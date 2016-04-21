@@ -35,8 +35,9 @@ namespace
         for (unsigned p = 0 ; p < graphs.first.size() ; ++p) {
             variables.domains.emplace(p, std::set<unsigned>());
             for (unsigned t = 0 ; t < graphs.second.size() ; ++t) {
-                if (graphs.first.degree(p) <= graphs.second.degree(t))
-                    variables.domains[p].insert(t);
+                if (graphs.first.adjacent(p, p) == graphs.second.adjacent(t, t))
+                    if (graphs.first.degree(p) <= graphs.second.degree(t))
+                        variables.domains[p].insert(t);
             }
         }
     }
@@ -72,20 +73,33 @@ namespace
                 const auto & d_variables = variables_stack.variables.at(d);
 
                 if (*parent_variables.domains.find(branch_variable->first) != *d_variables.domains.find(branch_variable->first))
-                    std::cerr << " " << d_variables.assignment.first << "=" << d_variables.assignment.second;
+                    std::cerr << " " << d << "/" << d_variables.assignment.first << "=" << d_variables.assignment.second;
             }
             std::cerr << std::endl;
 
-            std::cerr << "  backward levels";
+            std::cerr << "  dynamic levels";
 
-            std::set<int> unseen;
-            for (unsigned t = 0 ; t < graphs.second.size() ; ++t)
-                unseen.emplace(t);
+            std::set<unsigned> unseen = variables_stack.variables.at(0).domains.find(branch_variable->first)->second;
 
-            for (int d = stack_level - 1 ; d >= 0 ; --d) {
+            for (unsigned d = stack_level - 1 ; d >= 1 ; --d) {
                 const auto & d_variables = variables_stack.variables.at(d);
 
-                std::set<int> disallowed;
+                std::set<unsigned> disallowed;
+                disallowed.emplace(d_variables.assignment.second);
+                if (graphs.first.adjacent(d_variables.assignment.first, branch_variable->first))
+                    for (unsigned t = 0 ; t < graphs.second.size() ; ++t)
+                        if (! graphs.second.adjacent(d_variables.assignment.second, t))
+                            disallowed.emplace(t);
+
+                bool reduced = false;
+                for (auto & v : disallowed)
+                    if (unseen.count(v)) {
+                        reduced = true;
+                        unseen.erase(v);
+                    }
+
+                if (reduced)
+                    std::cerr << " " << d << "/" << d_variables.assignment.first << "=" << d_variables.assignment.second;
             }
             std::cerr << std::endl;
             return false;
