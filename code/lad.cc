@@ -17,9 +17,9 @@ auto GraphFileError::what() const throw () -> const char *
 
 namespace
 {
-    auto read_word(std::ifstream & infile) -> int
+    auto read_word(std::ifstream & infile) -> unsigned
     {
-        int x;
+        unsigned x;
         infile >> x;
         return x;
     }
@@ -37,15 +37,15 @@ auto read_lad(const std::string & filename) -> Graph
     if (! infile)
         throw GraphFileError{ filename, "error reading size" };
 
-    for (int r = 0 ; r < result.size() ; ++r) {
-        int c_end = read_word(infile);
+    for (unsigned r = 0 ; r < result.size() ; ++r) {
+        unsigned c_end = read_word(infile);
         if (! infile)
             throw GraphFileError{ filename, "error reading edges count" };
 
-        for (int c = 0 ; c < c_end ; ++c) {
-            int e = read_word(infile);
+        for (unsigned c = 0 ; c < c_end ; ++c) {
+            unsigned e = read_word(infile);
 
-            if (e < 0 || e >= result.size())
+            if (e >= result.size())
                 throw GraphFileError{ filename, "edge index out of bounds" };
 
             result.add_edge(r, e);

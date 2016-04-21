@@ -24,7 +24,7 @@ class Graph
         using AdjacencyMatrix = std::vector<std::uint8_t>;
 
     private:
-        int _size = 0;
+        unsigned _size = 0;
         AdjacencyMatrix _adjacency;
         bool _add_one_for_output;
 
@@ -32,13 +32,13 @@ class Graph
          * Return the appropriate offset into _adjacency for the edge (a,
          * b).
          */
-        auto _position(int a, int b) const -> AdjacencyMatrix::size_type;
+        auto _position(unsigned a, unsigned b) const -> AdjacencyMatrix::size_type;
 
     public:
         /**
          * \param initial_size can be 0, if resize() is called afterwards.
          */
-        Graph(int initial_size);
+        Graph(unsigned initial_size);
 
         Graph(const Graph &) = default;
 
@@ -47,28 +47,28 @@ class Graph
         /**
          * Number of vertices.
          */
-        auto size() const -> int;
+        auto size() const -> unsigned;
 
         /**
          * Change our size. Must be called before adding an edge, and must
          * not be called afterwards.
          */
-        auto resize(int size) -> void;
+        auto resize(unsigned size) -> void;
 
         /**
          * Add an edge from a to b (and from b to a).
          */
-        auto add_edge(int a, int b) -> void;
+        auto add_edge(unsigned a, unsigned b) -> void;
 
         /**
          * Are vertices a and b adjacent?
          */
-        auto adjacent(int a, int b) const -> bool;
+        auto adjacent(unsigned a, unsigned b) const -> bool;
 
         /**
          * What is the degree of a given vertex?
          */
-        auto degree(int a) const -> int;
+        auto degree(unsigned a) const -> unsigned;
 };
 
 #endif

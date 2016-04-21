@@ -3,44 +3,44 @@
 #include "graph.hh"
 #include <algorithm>
 
-Graph::Graph(int size)
+Graph::Graph(unsigned size)
 {
     if (0 != size)
         resize(size);
 }
 
-auto Graph::_position(int a, int b) const -> AdjacencyMatrix::size_type
+auto Graph::_position(unsigned a, unsigned b) const -> AdjacencyMatrix::size_type
 {
     return (a * _size) + b;
 }
 
-auto Graph::resize(int size) -> void
+auto Graph::resize(unsigned size) -> void
 {
     _size = size;
     _adjacency.resize(size * size);
 }
 
-auto Graph::add_edge(int a, int b) -> void
+auto Graph::add_edge(unsigned a, unsigned b) -> void
 {
     _adjacency[_position(a, b)] = 1;
     _adjacency[_position(b, a)] = 1;
 }
 
-auto Graph::adjacent(int a, int b) const -> bool
+auto Graph::adjacent(unsigned a, unsigned b) const -> bool
 {
     return _adjacency[_position(a, b)];
 }
 
-auto Graph::size() const -> int
+auto Graph::size() const -> unsigned
 {
     return _size;
 }
 
-auto Graph::degree(int a) const -> int
+auto Graph::degree(unsigned a) const -> unsigned
 {
     return std::count_if(
             _adjacency.begin() + a * _size,
             _adjacency.begin() + (a + 1) * _size,
-            [] (int x) { return !!x; });
+            [] (unsigned x) { return !!x; });
 }
 
