@@ -17,6 +17,7 @@ namespace
         }
 
         std::map<unsigned, std::set<unsigned> > domains;
+        std::pair<unsigned, unsigned> assignment;
     };
 
     struct VariablesStack
@@ -64,6 +65,29 @@ namespace
 
         if (branch_variable->second.empty()) {
             std::cerr << "wipeout on " << branch_variable->first << " at depth " << stack_level << std::endl;
+
+            std::cerr << "  forward levels";
+            for (unsigned d = 1 ; d < stack_level ; ++d) {
+                const auto & parent_variables = variables_stack.variables.at(d - 1);
+                const auto & d_variables = variables_stack.variables.at(d);
+
+                if (*parent_variables.domains.find(branch_variable->first) != *d_variables.domains.find(branch_variable->first))
+                    std::cerr << " " << d_variables.assignment.first << "=" << d_variables.assignment.second;
+            }
+            std::cerr << std::endl;
+
+            std::cerr << "  backward levels";
+
+            std::set<int> unseen;
+            for (unsigned t = 0 ; t < graphs.second.size() ; ++t)
+                unseen.emplace(t);
+
+            for (int d = stack_level - 1 ; d >= 0 ; --d) {
+                const auto & d_variables = variables_stack.variables.at(d);
+
+                std::set<int> disallowed;
+            }
+            std::cerr << std::endl;
             return false;
         }
 
@@ -74,6 +98,7 @@ namespace
             next_variables = variables;
 
             next_variables.domains.erase(branch_variable->first);
+            next_variables.assignment = { branch_variable->first, t };
 
             for (auto & d : next_variables.domains) {
                 // propagate all-different
@@ -92,6 +117,7 @@ namespace
                 return true;
         }
 
+        std::cerr << "out of values on " << branch_variable->first << " at depth " << stack_level << std::endl;
         return false;
     }
 }
