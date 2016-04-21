@@ -181,8 +181,8 @@ auto main(int argc, char * argv[]) -> int
         std::cout << std::endl;
 
         if (! result.isomorphism.empty()) {
-            for (int i = 0 ; i < graphs.first.size() ; ++i) {
-                for (int j = 0 ; j < graphs.first.size() ; ++j) {
+            for (unsigned i = 0 ; i < graphs.first.size() ; ++i) {
+                for (unsigned j = 0 ; j < graphs.first.size() ; ++j) {
                     if (graphs.first.adjacent(i, j)) {
                         if (! graphs.second.adjacent(result.isomorphism.find(i)->second, result.isomorphism.find(j)->second)) {
                             std::cerr << "Oops! not an isomorphism" << std::endl;
