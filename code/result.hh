@@ -15,9 +15,6 @@ struct Result
     /// Total number of nodes processed.
     unsigned long long nodes = 0;
 
-    /// A count, if enumerating.
-    unsigned result_count = 0;
-
     /**
      * Runtimes. The first entry in the list is the total runtime.
      * Additional values are for each worker thread.
