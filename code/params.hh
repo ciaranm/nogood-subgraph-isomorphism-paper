@@ -13,9 +13,6 @@ struct Params
 
     /// The start time of the algorithm.
     std::chrono::time_point<std::chrono::steady_clock> start_time;
-
-    /// Number of threads to use, where appropriate.
-    unsigned n_threads = 1;
 };
 
 #endif
