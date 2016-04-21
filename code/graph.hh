@@ -9,7 +9,7 @@
 #include <cstdint>
 
 /**
- * A graph, with an adjaceny matrix representation. We only provide the
+ * A graph, with an adjacency matrix representation. We only provide the
  * operations we actually need.
  *
  * Indices start at 0.
