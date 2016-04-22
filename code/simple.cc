@@ -81,7 +81,7 @@ namespace
 
             std::set<unsigned> unseen = variables_stack.variables.at(0).domains.find(branch_variable->first)->second;
 
-            for (unsigned d = stack_level - 1 ; d >= 1 ; --d) {
+            for (unsigned d = stack_level ; d >= 1 ; --d) {
                 const auto & d_variables = variables_stack.variables.at(d);
 
                 std::set<unsigned> disallowed;
@@ -101,11 +101,64 @@ namespace
                 if (reduced)
                     std::cerr << " " << d << "/" << d_variables.assignment.first << "=" << d_variables.assignment.second;
             }
+
+            if (! unseen.empty()) {
+                std::cerr << " unseen not empty";
+                throw 0;
+            }
             std::cerr << std::endl;
+
+            std::cerr << "  covered levels";
+
+            unseen = variables_stack.variables.at(0).domains.find(branch_variable->first)->second;
+            std::vector<std::pair<unsigned, std::set<unsigned> > > disallowed_by_level(stack_level + 1);
+
+            for (unsigned d = stack_level ; d >= 1 ; --d) {
+                const auto & d_variables = variables_stack.variables.at(d);
+
+                disallowed_by_level.at(d).first = d;
+                disallowed_by_level.at(d).second.emplace(d_variables.assignment.second);
+                if (graphs.first.adjacent(d_variables.assignment.first, branch_variable->first))
+                    for (unsigned t = 0 ; t < graphs.second.size() ; ++t)
+                        if (! graphs.second.adjacent(d_variables.assignment.second, t))
+                            disallowed_by_level.at(d).second.emplace(t);
+            }
+
+            while (! unseen.empty()) {
+                auto & d = *std::max_element(disallowed_by_level.rbegin(), disallowed_by_level.rend(),
+                        [] (const auto & a, const auto & b) {
+                            return a.second.size() < b.second.size();
+                        });
+
+                if (d.second.empty()) {
+                    std::cerr << " disallowed empty";
+                    throw 0;
+                }
+
+                bool reduced = false;
+                for (auto & v : d.second)
+                    if (unseen.count(v)) {
+                        reduced = true;
+                        unseen.erase(v);
+                    }
+
+                if (reduced)
+                    std::cerr << " " << d.first << "/" << variables_stack.variables.at(d.first).assignment.first
+                        << "=" << variables_stack.variables.at(d.first).assignment.second;
+
+                auto to_remove = d.second;
+                for (auto & l : disallowed_by_level) {
+                    for (auto & r : to_remove)
+                        l.second.erase(r);
+                }
+            }
+            std::cerr << std::endl;
+
             return false;
         }
 
-        for (auto & t : branch_variable->second) {
+        for (const auto & t : branch_variable->second) {
+            std::cerr << "at " << stack_level << " try " << branch_variable->first << "=" << t << std::endl;
             result.isomorphism[branch_variable->first] = t;
 
             auto & next_variables = variables_stack.variables.at(stack_level + 1);
