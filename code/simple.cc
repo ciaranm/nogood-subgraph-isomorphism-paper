@@ -196,7 +196,8 @@ auto simple_subgraph_isomorphism(const std::pair<Graph, Graph> & graphs, const P
     VariablesStack variables_stack(graphs.first.size(), graphs.second.size());
 
     initialise_variables(graphs, params, variables_stack.variables.at(0));
-    solve(graphs, params, result, variables_stack, 0);
+    if (! solve(graphs, params, result, variables_stack, 0))
+        result.isomorphism.clear();
 
     return result;
 }
