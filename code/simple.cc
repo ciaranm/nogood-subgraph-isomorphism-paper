@@ -4,9 +4,18 @@
 
 #include <set>
 #include <map>
+#include <vector>
 #include <algorithm>
 
 #include <iostream>
+
+using std::map;
+using std::set;
+using std::vector;
+using std::pair;
+
+using std::cerr;
+using std::endl;
 
 namespace
 {
@@ -16,13 +25,13 @@ namespace
         {
         }
 
-        std::map<unsigned, std::set<unsigned> > domains;
-        std::pair<unsigned, unsigned> assignment;
+        map<unsigned, set<unsigned> > domains;
+        pair<unsigned, unsigned> assignment;
     };
 
     struct VariablesStack
     {
-        std::vector<Variables> variables;
+        vector<Variables> variables;
 
         VariablesStack(unsigned depth, unsigned width) :
             variables(depth + 1, Variables{ width })
@@ -30,14 +39,14 @@ namespace
             }
     };
 
-    using FalseImplication = std::vector<std::pair<unsigned, unsigned> >;
+    using FalseImplication = vector<pair<unsigned, unsigned> >;
 
-    using LearnedNogoods = std::set<FalseImplication>;
+    using LearnedNogoods = set<FalseImplication>;
 
-    auto initialise_variables(const std::pair<Graph, Graph> & graphs, const Params &, Variables & variables)
+    auto initialise_variables(const pair<Graph, Graph> & graphs, const Params &, Variables & variables)
     {
         for (unsigned p = 0 ; p < graphs.first.size() ; ++p) {
-            variables.domains.emplace(p, std::set<unsigned>());
+            variables.domains.emplace(p, set<unsigned>());
             for (unsigned t = 0 ; t < graphs.second.size() ; ++t) {
                 if (graphs.first.adjacent(p, p) == graphs.second.adjacent(t, t))
                     if (graphs.first.degree(p) <= graphs.second.degree(t))
@@ -46,22 +55,22 @@ namespace
         }
     }
 
-    auto smallest_domain(Variables & variables) -> std::map<unsigned, std::set<unsigned> >::iterator
+    auto smallest_domain(Variables & variables) -> map<unsigned, set<unsigned> >::iterator
     {
-        return std::min_element(variables.domains.begin(), variables.domains.end(),
+        return min_element(variables.domains.begin(), variables.domains.end(),
                 [] (const auto & a, const auto & b) {
                     return a.second.size() < b.second.size();
                     });
     }
 
-    auto learn_greedy(const std::pair<Graph, Graph> & graphs,
+    auto learn_greedy(const pair<Graph, Graph> & graphs,
             const VariablesStack & variables_stack, unsigned stack_level, LearnedNogoods & learned_nogoods,
             const unsigned failed_variable)
     {
         FalseImplication nogood;
 
         auto unseen = variables_stack.variables.at(0).domains.find(failed_variable)->second;
-        std::vector<std::pair<unsigned, std::set<unsigned> > > disallowed_by_level(stack_level + 1);
+        vector<pair<unsigned, set<unsigned> > > disallowed_by_level(stack_level + 1);
 
         for (unsigned d = stack_level ; d >= 1 ; --d) {
             const auto & d_variables = variables_stack.variables.at(d);
@@ -75,7 +84,7 @@ namespace
         }
 
         while (! unseen.empty()) {
-            auto & d = *std::max_element(disallowed_by_level.rbegin(), disallowed_by_level.rend(),
+            auto & d = *max_element(disallowed_by_level.rbegin(), disallowed_by_level.rend(),
                     [] (const auto & a, const auto & b) {
                         return a.second.size() < b.second.size();
                     });
@@ -130,7 +139,7 @@ namespace
         return false;
     }
 
-    auto solve(const std::pair<Graph, Graph> & graphs, const Params & params, Result & result,
+    auto solve(const pair<Graph, Graph> & graphs, const Params & params, Result & result,
             VariablesStack & variables_stack, unsigned stack_level,
             LearnedNogoods & learned_nogoods) -> bool
     {
@@ -186,7 +195,7 @@ namespace
     }
 }
 
-auto simple_subgraph_isomorphism(const std::pair<Graph, Graph> & graphs, const Params & params) -> Result
+auto simple_subgraph_isomorphism(const pair<Graph, Graph> & graphs, const Params & params) -> Result
 {
     Result result;
 
@@ -197,14 +206,14 @@ auto simple_subgraph_isomorphism(const std::pair<Graph, Graph> & graphs, const P
     if (! solve(graphs, params, result, variables_stack, 0, learned_nogoods))
         result.isomorphism.clear();
 
-    std::map<unsigned, unsigned> clauses;
+    map<unsigned, unsigned> clauses;
     for (auto & n : learned_nogoods)
         clauses[n.size()]++;
 
-    std::cerr << "Learned " << learned_nogoods.size() << ":";
+    cerr << "Learned " << learned_nogoods.size() << ":";
     for (auto & c : clauses)
-        std::cerr << " " << c.first << "=" << c.second;
-    std::cerr << std::endl;
+        cerr << " " << c.first << "=" << c.second;
+    cerr << endl;
 
     return result;
 }
