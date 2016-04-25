@@ -89,6 +89,7 @@ auto main(int argc, char * argv[]) -> int
         po::options_description display_options{ "Program options" };
         display_options.add_options()
             ("help",                                  "Display help information")
+            ("timeout",            po::value<int>(),  "Abort after this many seconds")
             ;
 
         po::options_description all_options{ "All options" };
