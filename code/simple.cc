@@ -30,6 +30,10 @@ namespace
             }
     };
 
+    using FalseImplication = std::vector<std::pair<unsigned, unsigned> >;
+
+    using LearnedNogoods = std::set<FalseImplication>;
+
     auto initialise_variables(const std::pair<Graph, Graph> & graphs, const Params &, Variables & variables)
     {
         for (unsigned p = 0 ; p < graphs.first.size() ; ++p) {
@@ -50,10 +54,90 @@ namespace
                     });
     }
 
+    auto learn_greedy(const std::pair<Graph, Graph> & graphs,
+            const VariablesStack & variables_stack, unsigned stack_level, LearnedNogoods & learned_nogoods,
+            const unsigned failed_variable)
+    {
+        FalseImplication nogood;
+
+        auto unseen = variables_stack.variables.at(0).domains.find(failed_variable)->second;
+        std::vector<std::pair<unsigned, std::set<unsigned> > > disallowed_by_level(stack_level + 1);
+
+        for (unsigned d = stack_level ; d >= 1 ; --d) {
+            const auto & d_variables = variables_stack.variables.at(d);
+
+            disallowed_by_level.at(d).first = d;
+            disallowed_by_level.at(d).second.emplace(d_variables.assignment.second);
+            if (graphs.first.adjacent(d_variables.assignment.first, failed_variable))
+                for (unsigned t = 0 ; t < graphs.second.size() ; ++t)
+                    if (! graphs.second.adjacent(d_variables.assignment.second, t))
+                        disallowed_by_level.at(d).second.emplace(t);
+        }
+
+        while (! unseen.empty()) {
+            auto & d = *std::max_element(disallowed_by_level.rbegin(), disallowed_by_level.rend(),
+                    [] (const auto & a, const auto & b) {
+                        return a.second.size() < b.second.size();
+                    });
+
+            if (d.second.empty())
+                throw 0;
+
+            bool reduced = false;
+            for (auto & v : d.second)
+                if (unseen.count(v)) {
+                    reduced = true;
+                    unseen.erase(v);
+                }
+
+            if (reduced)
+                nogood.emplace_back(variables_stack.variables.at(d.first).assignment);
+
+            auto to_remove = d.second;
+            for (auto & l : disallowed_by_level) {
+                for (auto & r : to_remove)
+                    l.second.erase(r);
+            }
+        }
+
+        learned_nogoods.insert(nogood);
+    }
+
+    auto current_state_is_nogood(
+            VariablesStack & variables_stack, unsigned stack_level,
+            LearnedNogoods & learned_nogoods) -> bool
+    {
+        for (auto & nogood : learned_nogoods) {
+            bool contradicted = false;
+            for (auto & a : nogood) {
+                bool found = false;
+                for (unsigned d = 1 ; d <= stack_level ; ++d)
+                    if (variables_stack.variables.at(d).assignment == a) {
+                        found = true;
+                        break;
+                    }
+
+                if (! found) {
+                    contradicted = true;
+                    break;
+                }
+            }
+
+            if (! contradicted)
+                return true;
+        }
+
+        return false;
+    }
+
     auto solve(const std::pair<Graph, Graph> & graphs, const Params & params, Result & result,
-            VariablesStack & variables_stack, unsigned stack_level) -> bool
+            VariablesStack & variables_stack, unsigned stack_level,
+            LearnedNogoods & learned_nogoods) -> bool
     {
         if (*params.abort)
+            return false;
+
+        if (current_state_is_nogood(variables_stack, stack_level, learned_nogoods))
             return false;
 
         ++result.nodes;
@@ -65,100 +149,12 @@ namespace
             return true;
 
         if (branch_variable->second.empty()) {
-            std::cerr << "wipeout on " << branch_variable->first << " at depth " << stack_level << std::endl;
-
-            std::cerr << "  forward levels";
-            for (unsigned d = 1 ; d < stack_level ; ++d) {
-                const auto & parent_variables = variables_stack.variables.at(d - 1);
-                const auto & d_variables = variables_stack.variables.at(d);
-
-                if (*parent_variables.domains.find(branch_variable->first) != *d_variables.domains.find(branch_variable->first))
-                    std::cerr << " " << d << "/" << d_variables.assignment.first << "=" << d_variables.assignment.second;
-            }
-            std::cerr << std::endl;
-
-            std::cerr << "  dynamic levels";
-
-            std::set<unsigned> unseen = variables_stack.variables.at(0).domains.find(branch_variable->first)->second;
-
-            for (unsigned d = stack_level ; d >= 1 ; --d) {
-                const auto & d_variables = variables_stack.variables.at(d);
-
-                std::set<unsigned> disallowed;
-                disallowed.emplace(d_variables.assignment.second);
-                if (graphs.first.adjacent(d_variables.assignment.first, branch_variable->first))
-                    for (unsigned t = 0 ; t < graphs.second.size() ; ++t)
-                        if (! graphs.second.adjacent(d_variables.assignment.second, t))
-                            disallowed.emplace(t);
-
-                bool reduced = false;
-                for (auto & v : disallowed)
-                    if (unseen.count(v)) {
-                        reduced = true;
-                        unseen.erase(v);
-                    }
-
-                if (reduced)
-                    std::cerr << " " << d << "/" << d_variables.assignment.first << "=" << d_variables.assignment.second;
-            }
-
-            if (! unseen.empty()) {
-                std::cerr << " unseen not empty";
-                throw 0;
-            }
-            std::cerr << std::endl;
-
-            std::cerr << "  covered levels";
-
-            unseen = variables_stack.variables.at(0).domains.find(branch_variable->first)->second;
-            std::vector<std::pair<unsigned, std::set<unsigned> > > disallowed_by_level(stack_level + 1);
-
-            for (unsigned d = stack_level ; d >= 1 ; --d) {
-                const auto & d_variables = variables_stack.variables.at(d);
-
-                disallowed_by_level.at(d).first = d;
-                disallowed_by_level.at(d).second.emplace(d_variables.assignment.second);
-                if (graphs.first.adjacent(d_variables.assignment.first, branch_variable->first))
-                    for (unsigned t = 0 ; t < graphs.second.size() ; ++t)
-                        if (! graphs.second.adjacent(d_variables.assignment.second, t))
-                            disallowed_by_level.at(d).second.emplace(t);
-            }
-
-            while (! unseen.empty()) {
-                auto & d = *std::max_element(disallowed_by_level.rbegin(), disallowed_by_level.rend(),
-                        [] (const auto & a, const auto & b) {
-                            return a.second.size() < b.second.size();
-                        });
-
-                if (d.second.empty()) {
-                    std::cerr << " disallowed empty";
-                    throw 0;
-                }
-
-                bool reduced = false;
-                for (auto & v : d.second)
-                    if (unseen.count(v)) {
-                        reduced = true;
-                        unseen.erase(v);
-                    }
-
-                if (reduced)
-                    std::cerr << " " << d.first << "/" << variables_stack.variables.at(d.first).assignment.first
-                        << "=" << variables_stack.variables.at(d.first).assignment.second;
-
-                auto to_remove = d.second;
-                for (auto & l : disallowed_by_level) {
-                    for (auto & r : to_remove)
-                        l.second.erase(r);
-                }
-            }
-            std::cerr << std::endl;
+            learn_greedy(graphs, variables_stack, stack_level, learned_nogoods, branch_variable->first);
 
             return false;
         }
 
         for (const auto & t : branch_variable->second) {
-            std::cerr << "at " << stack_level << " try " << branch_variable->first << "=" << t << std::endl;
             result.isomorphism[branch_variable->first] = t;
 
             auto & next_variables = variables_stack.variables.at(stack_level + 1);
@@ -172,19 +168,20 @@ namespace
                 d.second.erase(t);
 
                 // propagate adjacency
-                if (graphs.first.adjacent(branch_variable->first, d.first))
-                    for (auto i = d.second.begin() ; i != d.second.end() ; )
+                if (graphs.first.adjacent(branch_variable->first, d.first)) {
+                    for (auto i = d.second.begin() ; i != d.second.end() ; ) {
                         if (graphs.second.adjacent(t, *i))
                             ++i;
                         else
                             d.second.erase(i++);
+                    }
+                }
             }
 
-            if (solve(graphs, params, result, variables_stack, stack_level + 1))
+            if (solve(graphs, params, result, variables_stack, stack_level + 1, learned_nogoods))
                 return true;
         }
 
-        std::cerr << "out of values on " << branch_variable->first << " at depth " << stack_level << std::endl;
         return false;
     }
 }
@@ -194,10 +191,20 @@ auto simple_subgraph_isomorphism(const std::pair<Graph, Graph> & graphs, const P
     Result result;
 
     VariablesStack variables_stack(graphs.first.size(), graphs.second.size());
+    LearnedNogoods learned_nogoods;
 
     initialise_variables(graphs, params, variables_stack.variables.at(0));
-    if (! solve(graphs, params, result, variables_stack, 0))
+    if (! solve(graphs, params, result, variables_stack, 0, learned_nogoods))
         result.isomorphism.clear();
+
+    std::map<unsigned, unsigned> clauses;
+    for (auto & n : learned_nogoods)
+        clauses[n.size()]++;
+
+    std::cerr << "Learned " << learned_nogoods.size() << ":";
+    for (auto & c : clauses)
+        std::cerr << " " << c.first << "=" << c.second;
+    std::cerr << std::endl;
 
     return result;
 }
