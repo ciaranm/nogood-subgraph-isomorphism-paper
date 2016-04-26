@@ -101,9 +101,15 @@ namespace
             const VariablesStack & variables_stack, unsigned stack_level, LearnedNogoods & learned_nogoods,
             const unsigned failed_variable)
     {
-        FalseImplication nogood;
+        FalseImplication new_nogood;
 
         auto unseen = variables_stack.variables.at(0).domains.find(failed_variable)->second;
+
+        // remove any 1 nogoods
+        for (auto & n : learned_nogoods)
+            if (n.size() == 1 && n[0].first == failed_variable)
+                unseen.erase(n[0].second);
+
         vector<pair<unsigned, set<unsigned> > > disallowed_by_level(stack_level + 1);
 
         for (unsigned d = stack_level ; d >= 1 ; --d) {
@@ -123,8 +129,9 @@ namespace
                         return a.second.size() < b.second.size();
                     });
 
-            if (d.second.empty())
-                throw 0;
+            if (d.second.empty()) {
+                return;
+            }
 
             bool reduced = false;
             for (auto & v : d.second)
@@ -133,8 +140,45 @@ namespace
                     unseen.erase(v);
                 }
 
-            if (reduced)
-                nogood.emplace_back(variables_stack.variables.at(d.first).assignment);
+            if (reduced) {
+                new_nogood.emplace_back(variables_stack.variables.at(d.first).assignment);
+
+                // now look for unit propagation based upon the current nogood
+                for (auto & nogood : learned_nogoods) {
+                    bool contradicted = false;
+                    unsigned matches = 0, mismatches = 0;
+                    pair<unsigned, unsigned> missed_clause;
+
+                    for (auto & a : nogood) {
+                        unsigned found = false;
+                        for (auto & n : new_nogood) {
+                            if (n == a) {
+                                found = true;
+                                break;
+                            }
+                            else if (n.first == a.first) {
+                                contradicted = true;
+                                break;
+                            }
+                        }
+
+                        if (found)
+                            ++matches;
+                        else
+                            missed_clause = a;
+
+                        if (mismatches > 1)
+                            break;
+                    }
+
+                    if ((! contradicted) && (matches == nogood.size() - 1) && missed_clause.first == failed_variable) {
+                        auto to_remove = missed_clause.second;
+                        unseen.erase(to_remove);
+                        for (auto & l : disallowed_by_level)
+                            l.second.erase(to_remove);
+                    }
+                }
+            }
 
             auto to_remove = d.second;
             for (auto & l : disallowed_by_level) {
@@ -143,34 +187,7 @@ namespace
             }
         }
 
-        learned_nogoods.insert(nogood);
-    }
-
-    auto current_state_is_nogood(
-            VariablesStack & variables_stack, unsigned stack_level,
-            LearnedNogoods & learned_nogoods) -> bool
-    {
-        for (auto & nogood : learned_nogoods) {
-            bool contradicted = false;
-            for (auto & a : nogood) {
-                bool found = false;
-                for (unsigned d = 1 ; d <= stack_level ; ++d)
-                    if (variables_stack.variables.at(d).assignment == a) {
-                        found = true;
-                        break;
-                    }
-
-                if (! found) {
-                    contradicted = true;
-                    break;
-                }
-            }
-
-            if (! contradicted)
-                return true;
-        }
-
-        return false;
+        learned_nogoods.insert(new_nogood);
     }
 
     auto solve(const pair<Graph, Graph> & graphs, const Params & params, Result & result,
@@ -178,9 +195,6 @@ namespace
             LearnedNogoods & learned_nogoods) -> bool
     {
         if (*params.abort)
-            return false;
-
-        if (current_state_is_nogood(variables_stack, stack_level, learned_nogoods))
             return false;
 
         ++result.nodes;
@@ -226,7 +240,48 @@ namespace
                 }
             }
 
-            if (solve(graphs, params, result, variables_stack, stack_level + 1, learned_nogoods))
+            // propagate learning
+            bool state_is_nogood = false;
+            for (auto & nogood : learned_nogoods) {
+                bool contradicted = false;
+                unsigned matches = 0, mismatches = 0;
+                pair<unsigned, unsigned> missed_clause;
+
+                for (auto & a : nogood) {
+                    unsigned found = false;
+                    for (unsigned d = 1 ; d <= stack_level + 1 ; ++d) {
+                        if (variables_stack.variables.at(d).assignment == a) {
+                            found = true;
+                            break;
+                        }
+                        else if (variables_stack.variables.at(d).assignment.first == a.first) {
+                            contradicted = true;
+                            break;
+                        }
+                    }
+
+                    if (found)
+                        ++matches;
+                    else
+                        missed_clause = a;
+
+                    if (mismatches > 1)
+                        break;
+                }
+
+                if (! contradicted) {
+                    if (matches == nogood.size()) {
+                        state_is_nogood = true;
+                    }
+                    else if (matches == nogood.size() - 1) {
+                        auto v = next_variables.domains.find(missed_clause.first);
+                        if (v == next_variables.domains.end()) throw 0;
+                        v->second.erase(missed_clause.second);
+                    }
+                }
+            }
+
+            if ((! state_is_nogood) && solve(graphs, params, result, variables_stack, stack_level + 1, learned_nogoods))
                 return true;
         }
 
