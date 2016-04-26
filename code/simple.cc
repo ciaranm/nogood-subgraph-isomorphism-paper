@@ -196,7 +196,12 @@ namespace
             return false;
         }
 
-        for (const auto & t : branch_variable->second) {
+        vector<unsigned> branch_values(branch_variable->second.begin(), branch_variable->second.end());
+        sort(branch_values.begin(), branch_values.end(), [&] (auto & a, auto & b) {
+                return graphs.second.degree(a) > graphs.second.degree(b);
+                });
+
+        for (const auto & t : branch_values) {
             result.isomorphism[branch_variable->first] = t;
 
             auto & next_variables = variables_stack.variables.at(stack_level + 1);
