@@ -13,6 +13,7 @@ using std::map;
 using std::set;
 using std::vector;
 using std::pair;
+using std::greater;
 
 using std::cerr;
 using std::endl;
@@ -45,12 +46,44 @@ namespace
 
     auto initialise_variables(const pair<Graph, Graph> & graphs, const Params &, Variables & variables)
     {
+        vector<unsigned> pattern_degrees(graphs.first.size()), target_degrees(graphs.second.size());
+        vector<vector<unsigned> > pattern_nds(graphs.first.size()), target_nds(graphs.second.size());
+
+        for (unsigned p = 0 ; p < graphs.first.size() ; ++p)
+            pattern_degrees[p] = graphs.first.degree(p);
+
+        for (unsigned p = 0 ; p < graphs.first.size() ; ++p) {
+            for (unsigned q = 0 ; q < graphs.first.size() ; ++q)
+                if (graphs.first.adjacent(p, q))
+                    pattern_nds[p].push_back(pattern_degrees[q]);
+            sort(pattern_nds[p].begin(), pattern_nds[p].end(), greater<unsigned>());
+        }
+
+        for (unsigned t = 0 ; t < graphs.second.size() ; ++t)
+            target_degrees[t] = graphs.second.degree(t);
+
+        for (unsigned t = 0 ; t < graphs.second.size() ; ++t) {
+            for (unsigned u = 0 ; u < graphs.second.size() ; ++u)
+                if (graphs.second.adjacent(t, u))
+                    target_nds[t].push_back(target_degrees[u]);
+            sort(target_nds[t].begin(), target_nds[t].end(), greater<unsigned>());
+        }
+
         for (unsigned p = 0 ; p < graphs.first.size() ; ++p) {
             variables.domains.emplace(p, set<unsigned>());
             for (unsigned t = 0 ; t < graphs.second.size() ; ++t) {
                 if (graphs.first.adjacent(p, p) == graphs.second.adjacent(t, t))
-                    if (graphs.first.degree(p) <= graphs.second.degree(t))
-                        variables.domains[p].insert(t);
+                    if (pattern_degrees[p] <= target_degrees[t]) {
+                        bool ok = true;
+                        for (unsigned x = 0 ; x < pattern_degrees[p] ; ++x)
+                            if (pattern_nds[p][x] > target_nds[t][x]) {
+                                ok = false;
+                                break;
+                            }
+
+                        if (ok)
+                            variables.domains[p].insert(t);
+                    }
             }
         }
     }
