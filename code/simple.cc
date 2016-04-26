@@ -15,6 +15,7 @@ using std::vector;
 using std::pair;
 using std::greater;
 
+using std::cout;
 using std::cerr;
 using std::endl;
 
@@ -248,10 +249,10 @@ auto simple_subgraph_isomorphism(const pair<Graph, Graph> & graphs, const Params
     for (auto & n : learned_nogoods)
         clauses[n.size()]++;
 
-    cerr << "Learned " << learned_nogoods.size() << ":";
+    cout << "Learned " << learned_nogoods.size() << ":";
     for (auto & c : clauses)
-        cerr << " " << c.first << "=" << c.second;
-    cerr << endl;
+        cout << " " << c.first << "=" << c.second;
+    cout << endl;
 
     return result;
 }
