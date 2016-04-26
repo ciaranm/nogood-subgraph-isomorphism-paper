@@ -6,6 +6,7 @@
 #include <map>
 #include <list>
 #include <chrono>
+#include <string>
 
 struct Result
 {
@@ -20,6 +21,8 @@ struct Result
      * Additional values are for each worker thread.
      */
     std::list<std::chrono::milliseconds> times;
+
+    std::map<std::string, std::string> stats;
 };
 
 #endif

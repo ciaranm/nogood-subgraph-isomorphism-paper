@@ -14,6 +14,7 @@ using std::set;
 using std::vector;
 using std::pair;
 using std::greater;
+using std::to_string;
 
 using std::cout;
 using std::cerr;
@@ -45,7 +46,32 @@ namespace
 
     using LearnedNogoods = set<FalseImplication>;
 
-    auto initialise_variables(const pair<Graph, Graph> & graphs, const Params &, Variables & variables)
+    auto build_d2graphs(const pair<Graph, Graph> & graphs, pair<Graph, Graph> & d2graphs)
+    {
+        d2graphs.first.resize(graphs.first.size());
+
+        for (unsigned p = 0 ; p < graphs.first.size() ; ++p)
+            for (unsigned q = 0 ; q < graphs.first.size() ; ++q)
+                if (graphs.first.adjacent(p, q))
+                    for (unsigned r = 0 ; r < graphs.first.size() ; ++r)
+                        if (graphs.first.adjacent(q, r))
+                            d2graphs.first.add_edge(p, r);
+
+        d2graphs.second.resize(graphs.second.size());
+
+        for (unsigned p = 0 ; p < graphs.second.size() ; ++p)
+            for (unsigned q = 0 ; q < graphs.second.size() ; ++q)
+                if (graphs.second.adjacent(p, q))
+                    for (unsigned r = 0 ; r < graphs.second.size() ; ++r)
+                        if (graphs.second.adjacent(q, r))
+                            d2graphs.second.add_edge(p, r);
+    }
+
+    auto initialise_variables(
+            const pair<Graph, Graph> & graphs,
+            const pair<Graph, Graph> & d2graphs,
+            const Params & params,
+            Variables & variables)
     {
         vector<unsigned> pattern_degrees(graphs.first.size()), target_degrees(graphs.second.size());
         vector<vector<unsigned> > pattern_nds(graphs.first.size()), target_nds(graphs.second.size());
@@ -70,17 +96,50 @@ namespace
             sort(target_nds[t].begin(), target_nds[t].end(), greater<unsigned>());
         }
 
+        vector<unsigned> pattern_d2degrees(d2graphs.first.size()), target_d2degrees(d2graphs.second.size());
+        vector<vector<unsigned> > pattern_d2nds(d2graphs.first.size()), target_d2nds(d2graphs.second.size());
+
+        if (params.d2graphs) {
+            for (unsigned p = 0 ; p < d2graphs.first.size() ; ++p)
+                pattern_d2degrees[p] = d2graphs.first.degree(p);
+
+            for (unsigned p = 0 ; p < d2graphs.first.size() ; ++p) {
+                for (unsigned q = 0 ; q < d2graphs.first.size() ; ++q)
+                    if (d2graphs.first.adjacent(p, q))
+                        pattern_d2nds[p].push_back(pattern_d2degrees[q]);
+                sort(pattern_d2nds[p].begin(), pattern_d2nds[p].end(), greater<unsigned>());
+            }
+
+            for (unsigned t = 0 ; t < d2graphs.second.size() ; ++t)
+                target_d2degrees[t] = d2graphs.second.degree(t);
+
+            for (unsigned t = 0 ; t < d2graphs.second.size() ; ++t) {
+                for (unsigned u = 0 ; u < d2graphs.second.size() ; ++u)
+                    if (d2graphs.second.adjacent(t, u))
+                        target_d2nds[t].push_back(target_d2degrees[u]);
+                sort(target_d2nds[t].begin(), target_d2nds[t].end(), greater<unsigned>());
+            }
+        }
+
         for (unsigned p = 0 ; p < graphs.first.size() ; ++p) {
             variables.domains.emplace(p, set<unsigned>());
             for (unsigned t = 0 ; t < graphs.second.size() ; ++t) {
-                if (graphs.first.adjacent(p, p) == graphs.second.adjacent(t, t))
-                    if (pattern_degrees[p] <= target_degrees[t]) {
+                if (graphs.first.adjacent(p, p) == graphs.second.adjacent(t, t) &&
+                        ((! params.d2graphs) || (d2graphs.first.adjacent(p, p) == d2graphs.second.adjacent(t, t))))
+                    if (pattern_degrees[p] <= target_degrees[t] && ((! params.d2graphs) || pattern_d2degrees[p] <= target_d2degrees[t])) {
                         bool ok = true;
                         for (unsigned x = 0 ; x < pattern_degrees[p] ; ++x)
                             if (pattern_nds[p][x] > target_nds[t][x]) {
                                 ok = false;
                                 break;
                             }
+
+                        if (ok && params.d2graphs)
+                            for (unsigned x = 0 ; x < pattern_d2degrees[p] ; ++x)
+                                if (pattern_d2nds[p][x] > target_d2nds[t][x]) {
+                                    ok = false;
+                                    break;
+                                }
 
                         if (ok)
                             variables.domains[p].insert(t);
@@ -97,7 +156,10 @@ namespace
                     });
     }
 
-    auto learn_greedy(const pair<Graph, Graph> & graphs,
+    auto learn_greedy(
+            const pair<Graph, Graph> & graphs,
+            const pair<Graph, Graph> & d2graphs,
+            const Params & params,
             const VariablesStack & variables_stack, unsigned stack_level, LearnedNogoods & learned_nogoods,
             const unsigned failed_variable)
     {
@@ -117,9 +179,15 @@ namespace
 
             disallowed_by_level.at(d).first = d;
             disallowed_by_level.at(d).second.emplace(d_variables.assignment.second);
+
             if (graphs.first.adjacent(d_variables.assignment.first, failed_variable))
                 for (unsigned t = 0 ; t < graphs.second.size() ; ++t)
                     if (! graphs.second.adjacent(d_variables.assignment.second, t))
+                        disallowed_by_level.at(d).second.emplace(t);
+
+            if (params.d2graphs && d2graphs.first.adjacent(d_variables.assignment.first, failed_variable))
+                for (unsigned t = 0 ; t < d2graphs.second.size() ; ++t)
+                    if (! d2graphs.second.adjacent(d_variables.assignment.second, t))
                         disallowed_by_level.at(d).second.emplace(t);
         }
 
@@ -190,7 +258,8 @@ namespace
         learned_nogoods.insert(new_nogood);
     }
 
-    auto solve(const pair<Graph, Graph> & graphs, const Params & params, Result & result,
+    auto solve(const pair<Graph, Graph> & graphs, const pair<Graph, Graph> & d2graphs,
+            const Params & params, Result & result,
             VariablesStack & variables_stack, unsigned stack_level,
             LearnedNogoods & learned_nogoods) -> bool
     {
@@ -206,7 +275,8 @@ namespace
             return true;
 
         if (branch_variable->second.empty()) {
-            learn_greedy(graphs, variables_stack, stack_level, learned_nogoods, branch_variable->first);
+            if (params.learn)
+                learn_greedy(graphs, d2graphs, params, variables_stack, stack_level, learned_nogoods, branch_variable->first);
 
             return false;
         }
@@ -233,6 +303,15 @@ namespace
                 if (graphs.first.adjacent(branch_variable->first, d.first)) {
                     for (auto i = d.second.begin() ; i != d.second.end() ; ) {
                         if (graphs.second.adjacent(t, *i))
+                            ++i;
+                        else
+                            d.second.erase(i++);
+                    }
+                }
+
+                if (params.d2graphs && d2graphs.first.adjacent(branch_variable->first, d.first)) {
+                    for (auto i = d.second.begin() ; i != d.second.end() ; ) {
+                        if (d2graphs.second.adjacent(t, *i))
                             ++i;
                         else
                             d.second.erase(i++);
@@ -281,7 +360,7 @@ namespace
                 }
             }
 
-            if ((! state_is_nogood) && solve(graphs, params, result, variables_stack, stack_level + 1, learned_nogoods))
+            if ((! state_is_nogood) && solve(graphs, d2graphs, params, result, variables_stack, stack_level + 1, learned_nogoods))
                 return true;
         }
 
@@ -296,18 +375,22 @@ auto simple_subgraph_isomorphism(const pair<Graph, Graph> & graphs, const Params
     VariablesStack variables_stack(graphs.first.size(), graphs.second.size());
     LearnedNogoods learned_nogoods;
 
-    initialise_variables(graphs, params, variables_stack.variables.at(0));
-    if (! solve(graphs, params, result, variables_stack, 0, learned_nogoods))
+    std::pair<Graph, Graph> d2graphs;
+
+    if (params.d2graphs)
+        build_d2graphs(graphs, d2graphs);
+
+    initialise_variables(graphs, d2graphs, params, variables_stack.variables.at(0));
+
+    if (! solve(graphs, d2graphs, params, result, variables_stack, 0, learned_nogoods))
         result.isomorphism.clear();
 
     map<unsigned, unsigned> clauses;
     for (auto & n : learned_nogoods)
         clauses[n.size()]++;
 
-    cout << "Learned " << learned_nogoods.size() << ":";
     for (auto & c : clauses)
-        cout << " " << c.first << "=" << c.second;
-    cout << endl;
+        result.stats["L" + to_string(c.first)] = to_string(c.second);
 
     return result;
 }

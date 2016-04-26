@@ -90,6 +90,8 @@ auto main(int argc, char * argv[]) -> int
         display_options.add_options()
             ("help",                                  "Display help information")
             ("timeout",            po::value<int>(),  "Abort after this many seconds")
+            ("d2graphs",                              "Use d2 graphs")
+            ("learn",                                 "Learn")
             ;
 
         po::options_description all_options{ "All options" };
@@ -147,6 +149,9 @@ auto main(int argc, char * argv[]) -> int
         /* Figure out what our options should be. */
         Params params;
 
+        params.d2graphs = options_vars.count("d2graphs");
+        params.learn = options_vars.count("learn");
+
         /* Read in the graphs */
         auto graphs = std::make_pair(
             read_lad(options_vars["pattern-file"].as<std::string>()),
@@ -180,6 +185,13 @@ auto main(int argc, char * argv[]) -> int
                 std::cout << " " << t.count();
         }
         std::cout << std::endl;
+
+        if (! result.stats.empty()) {
+            for (auto & s : result.stats) {
+                std::cout << s.first << "=" << s.second << " ";
+            }
+            std::cout << std::endl;
+        }
 
         if (! result.isomorphism.empty()) {
             for (unsigned i = 0 ; i < graphs.first.size() ; ++i) {
