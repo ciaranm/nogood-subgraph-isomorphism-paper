@@ -362,6 +362,9 @@ namespace
 
             if ((! state_is_nogood) && solve(graphs, d2graphs, params, result, variables_stack, stack_level + 1, learned_nogoods))
                 return true;
+
+            if (*params.abort)
+                return false;
         }
 
         return false;
