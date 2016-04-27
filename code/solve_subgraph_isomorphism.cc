@@ -3,6 +3,7 @@
 #include "lad.hh"
 #include "dimacs.hh"
 #include "simple.hh"
+#include "sequential.hh"
 
 #include <boost/program_options.hpp>
 
@@ -83,7 +84,8 @@ auto run_this(Result_ func(const Data_ &, const Params_ &)) -> std::function<Res
 auto main(int argc, char * argv[]) -> int
 {
     auto subgraph_isomorphism_algorithms = {
-        std::make_pair( std::string{ "simple" },         simple_subgraph_isomorphism ),
+        std::make_pair( std::string{ "simple" },             simple_subgraph_isomorphism ),
+        std::make_pair( std::string{ "sequential" },         sequential_subgraph_isomorphism ),
     };
 
     try {
@@ -213,7 +215,8 @@ auto main(int argc, char * argv[]) -> int
                 for (unsigned j = 0 ; j < graphs.first.size() ; ++j) {
                     if (graphs.first.adjacent(i, j)) {
                         if (! graphs.second.adjacent(result.isomorphism.find(i)->second, result.isomorphism.find(j)->second)) {
-                            std::cerr << "Oops! not an isomorphism" << std::endl;
+                            std::cerr << "Oops! not an isomorphism: " << i << " -- " << j << " but "
+                               << result.isomorphism.find(i)->second << " -/- " << result.isomorphism.find(j)->second << std::endl;
                             return EXIT_FAILURE;
                         }
                     }

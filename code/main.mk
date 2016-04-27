@@ -10,6 +10,7 @@ TARGET := solve_subgraph_isomorphism
 
 SOURCES := \
     simple.cc \
+    sequential.cc \
     graph.cc \
     lad.cc \
     dimacs.cc \
