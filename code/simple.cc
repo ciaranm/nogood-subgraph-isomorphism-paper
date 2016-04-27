@@ -261,7 +261,8 @@ namespace
     auto solve(const pair<Graph, Graph> & graphs, const pair<Graph, Graph> & d2graphs,
             const Params & params, Result & result,
             VariablesStack & variables_stack, unsigned stack_level,
-            LearnedNogoods & learned_nogoods) -> bool
+            LearnedNogoods & learned_nogoods,
+            map<unsigned, unsigned> & fail_depths) -> bool
     {
         if (*params.abort)
             return false;
@@ -275,6 +276,7 @@ namespace
             return true;
 
         if (branch_variable->second.empty()) {
+            ++fail_depths[stack_level];
             if (params.learn)
                 learn_greedy(graphs, d2graphs, params, variables_stack, stack_level, learned_nogoods, branch_variable->first);
 
@@ -360,7 +362,8 @@ namespace
                 }
             }
 
-            if ((! state_is_nogood) && solve(graphs, d2graphs, params, result, variables_stack, stack_level + 1, learned_nogoods))
+            if ((! state_is_nogood) && solve(graphs, d2graphs, params, result, variables_stack, stack_level + 1, learned_nogoods,
+                        fail_depths))
                 return true;
 
             if (*params.abort)
@@ -377,20 +380,24 @@ auto simple_subgraph_isomorphism(const pair<Graph, Graph> & graphs, const Params
 
     VariablesStack variables_stack(graphs.first.size(), graphs.second.size());
     LearnedNogoods learned_nogoods;
+    map<unsigned, unsigned> fail_depths;
 
-    std::pair<Graph, Graph> d2graphs;
+    pair<Graph, Graph> d2graphs;
 
     if (params.d2graphs)
         build_d2graphs(graphs, d2graphs);
 
     initialise_variables(graphs, d2graphs, params, variables_stack.variables.at(0));
 
-    if (! solve(graphs, d2graphs, params, result, variables_stack, 0, learned_nogoods))
+    if (! solve(graphs, d2graphs, params, result, variables_stack, 0, learned_nogoods, fail_depths))
         result.isomorphism.clear();
 
     map<unsigned, unsigned> clauses;
     for (auto & n : learned_nogoods)
         clauses[n.size()]++;
+
+    for (auto & d : fail_depths)
+        result.stats["D" + to_string(d.first)] = to_string(d.second);
 
     for (auto & c : clauses)
         result.stats["L" + to_string(c.first)] = to_string(c.second);
