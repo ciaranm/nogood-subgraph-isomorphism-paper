@@ -120,6 +120,7 @@ namespace
 
             if (branch_domain.values.none()) {
                 // domain wipeout
+                ++fail_depths[assignments.size()];
                 return false;
             }
             // else if (branch_domain.values.count() == 1) {
