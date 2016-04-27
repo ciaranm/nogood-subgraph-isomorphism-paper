@@ -1,6 +1,7 @@
 /* vim: set sw=4 sts=4 et foldmethod=syntax : */
 
 #include "lad.hh"
+#include "dimacs.hh"
 #include "simple.hh"
 
 #include <boost/program_options.hpp>
@@ -90,6 +91,7 @@ auto main(int argc, char * argv[]) -> int
         display_options.add_options()
             ("help",                                  "Display help information")
             ("timeout",            po::value<int>(),  "Abort after this many seconds")
+            ("format",             po::value<std::string>(), "Specify graph file format (lad or dimacs)")
             ("d2graphs",                              "Use d2 graphs")
             ("learn",                                 "Learn")
             ;
@@ -152,10 +154,23 @@ auto main(int argc, char * argv[]) -> int
         params.d2graphs = options_vars.count("d2graphs");
         params.learn = options_vars.count("learn");
 
+        auto read_function = read_lad;
+
+        if (options_vars.count("format")) {
+            if (options_vars["format"].as<std::string>() == "lad")
+                read_function = read_lad;
+            else if (options_vars["format"].as<std::string>() == "dimacs")
+                read_function = read_dimacs;
+            else {
+                std::cerr << "Unknown format " << options_vars["format"].as<std::string>() << std::endl;
+                return EXIT_FAILURE;
+            }
+        }
+
         /* Read in the graphs */
         auto graphs = std::make_pair(
-            read_lad(options_vars["pattern-file"].as<std::string>()),
-            read_lad(options_vars["target-file"].as<std::string>()));
+            read_function(options_vars["pattern-file"].as<std::string>()),
+            read_function(options_vars["target-file"].as<std::string>()));
 
         /* Do the actual run. */
         bool aborted = false;

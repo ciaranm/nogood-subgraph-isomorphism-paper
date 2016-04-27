@@ -8,22 +8,6 @@
 #include <string>
 
 /**
- * Thrown if we come across bad data in a graph file, or if we can't read a
- * graph file.
- */
-class GraphFileError :
-    public std::exception
-{
-    private:
-        std::string _what;
-
-    public:
-        GraphFileError(const std::string & filename, const std::string & message) throw ();
-
-        auto what() const throw () -> const char *;
-};
-
-/**
  * Read a LAD format file into a Graph.
  *
  * \throw GraphFileError

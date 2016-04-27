@@ -5,16 +5,6 @@
 
 #include <fstream>
 
-GraphFileError::GraphFileError(const std::string & filename, const std::string & message) throw () :
-    _what("Error reading graph file '" + filename + "': " + message)
-{
-}
-
-auto GraphFileError::what() const throw () -> const char *
-{
-    return _what.c_str();
-}
-
 namespace
 {
     auto read_word(std::ifstream & infile) -> unsigned
