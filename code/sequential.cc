@@ -239,6 +239,31 @@ namespace
 
                 bitset supported_values = to_explain;
 
+                for (auto & c : adjacency_constraints)
+                    if (c.first[assignment.first].test(failed_variable))
+                        supported_values &= c.second[assignment.second];
+
+                if (supported_values != to_explain) {
+                    supported_values.reset(assignment.second);
+                    used_in_new_nogood.insert(assignment);
+                    learned_clauses.apply_units(new_nogood, failed_variable, supported_values, used_in_new_nogood);
+                    to_explain &= supported_values;
+                }
+                else
+                    new_nogood.pop_back();
+            }
+
+            for (auto & assignment : reverse(assignments)) {
+                if (used_in_new_nogood.count(assignment))
+                    continue;
+
+                if (to_explain.none())
+                    break;
+
+                new_nogood.push_back(assignment);
+
+                bitset supported_values = to_explain;
+
                 supported_values.reset(assignment.second);
 
                 for (auto & c : adjacency_constraints)
