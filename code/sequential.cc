@@ -5,6 +5,9 @@
 #include <map>
 #include <list>
 #include <boost/dynamic_bitset.hpp>
+#include <boost/range/adaptor/reversed.hpp>
+
+#include <iostream>
 
 using std::map;
 using std::vector;
@@ -12,6 +15,11 @@ using std::list;
 using std::to_string;
 using std::make_pair;
 using std::pair;
+
+using std::cerr;
+using std::endl;
+
+using boost::adaptors::reverse;
 
 using bitset = boost::dynamic_bitset<>;
 
@@ -32,6 +40,7 @@ namespace
 
         Result result;
         map<unsigned, unsigned> fail_depths;
+        map<unsigned, unsigned> learned_clause_sizes;
 
         list<pair<vector<bitset>, vector<bitset> > > adjacency_constraints;
 
@@ -109,6 +118,37 @@ namespace
                     });
         }
 
+        auto learn_from_wipeout(const unsigned failed_variable, const Assignments & assignments) -> void
+        {
+            bitset to_explain = initial_domains[failed_variable].values;
+            unsigned clause_length = 0;
+
+            for (auto & assignment : reverse(assignments)) {
+                if (to_explain.none())
+                    break;
+
+                bitset supported_values = to_explain;
+
+                supported_values.reset(assignment.second);
+
+                for (auto & c : adjacency_constraints)
+                    if (c.first[assignment.first].test(failed_variable))
+                        supported_values &= c.second[assignment.second];
+
+                if (to_explain != supported_values)
+                    ++clause_length;
+
+                to_explain &= supported_values;
+            }
+
+            if (! to_explain.none()) {
+                cerr << "Oops: couldn't explain failure: to explain contains " << to_explain.count()
+                    << " of " << initial_domains[failed_variable].values.count() << endl;
+            }
+            else
+                learned_clause_sizes[clause_length]++;
+        }
+
         auto solve(const Domains & domains, const Assignments & assignments) -> bool
         {
             if (*params.abort)
@@ -121,6 +161,10 @@ namespace
             if (branch_domain.values.none()) {
                 // domain wipeout
                 ++fail_depths[assignments.size()];
+
+                if (params.learn)
+                    learn_from_wipeout(branch_domain.v, assignments);
+
                 return false;
             }
             // else if (branch_domain.values.count() == 1) {
@@ -170,6 +214,9 @@ namespace
 
             for (auto & d : fail_depths)
                 result.stats["D" + to_string(d.first)] = to_string(d.second);
+
+            for (auto & d : learned_clause_sizes)
+                result.stats["L" + to_string(d.first)] = to_string(d.second);
         }
     };
 }
