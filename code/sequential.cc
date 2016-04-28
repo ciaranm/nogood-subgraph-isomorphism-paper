@@ -3,6 +3,7 @@
 #include "sequential.hh"
 
 #include <map>
+#include <set>
 #include <list>
 #include <boost/dynamic_bitset.hpp>
 #include <boost/range/adaptor/reversed.hpp>
@@ -10,11 +11,13 @@
 #include <iostream>
 
 using std::map;
+using std::set;
 using std::vector;
 using std::list;
 using std::to_string;
 using std::make_pair;
 using std::pair;
+using std::move;
 
 using std::cerr;
 using std::endl;
@@ -31,8 +34,111 @@ namespace
         bitset values;
     };
 
-    using Assignments = vector<pair<unsigned, unsigned> >;
     using Domains = vector<Domain>;
+
+    using Assignment = pair<unsigned, unsigned>;
+    using Assignments = vector<Assignment>;
+
+    struct LearnedClauses
+    {
+        list<vector<Assignment> > nogoods;
+
+        auto add(vector<Assignment> && clause) -> void
+        {
+            nogoods.push_back(move(clause));
+        }
+
+        auto apply_forced_assignment(Domains & domains, const Assignment & a)
+        {
+            for (auto & d : domains)
+                if (d.v == a.first) {
+                    d.values.reset(a.second);
+                    return;
+                }
+
+            throw 0;
+        }
+
+        enum nogood_knowledge { irrelevant, totally_nogood, single_assignment_forced };
+
+        auto reduce_assigned_domains(const vector<Assignment> & assignments, Domains & domains) -> bool
+        {
+            for (auto & nogood : nogoods) {
+                Assignment forced_assignment;
+                switch (what_does_nogood_tell_us(nogood, assignments, forced_assignment)) {
+                    case totally_nogood:
+                        return false;
+                    case single_assignment_forced:
+                        apply_forced_assignment(domains, forced_assignment);
+                        break;
+                    case irrelevant:
+                        break;
+                }
+            }
+
+            return true;
+        }
+
+        auto apply_units(const vector<Assignment> & assignments, unsigned branch_variable,
+                bitset & supported_values, set<Assignment> & used_assignments) -> void
+        {
+            for (auto & nogood : nogoods) {
+                Assignment forced_assignment;
+                switch (what_does_nogood_tell_us(nogood, assignments, forced_assignment)) {
+                    case totally_nogood:
+                        throw 0;
+                    case single_assignment_forced:
+                        if (forced_assignment.first == branch_variable) {
+                            used_assignments.insert(nogood.begin(), nogood.end());
+                            supported_values.reset(forced_assignment.second);
+                        }
+                        break;
+                    case irrelevant:
+                        break;
+                }
+            }
+        }
+
+        enum contained_in_assignment { contained, contradicts, missing };
+
+        auto what_does_nogood_tell_us(const vector<Assignment> & nogood, const vector<Assignment> & assignments,
+                Assignment & forced) -> nogood_knowledge
+        {
+            unsigned n_missing = 0;
+            for (auto & n : nogood) {
+                switch (contained_in_assignments(n, assignments)) {
+                    case contained:
+                        break;
+                    case contradicts:
+                        return irrelevant;
+                    case missing:
+                        ++n_missing;
+                        forced = n;
+                        break;
+                }
+                if (n_missing > 1)
+                    break;
+            }
+
+            if (0 == n_missing)
+                return totally_nogood;
+            else if (1 == n_missing)
+                return single_assignment_forced;
+            else
+                return irrelevant;
+        }
+
+        auto contained_in_assignments(const Assignment & n, const vector<Assignment> & assignments) -> contained_in_assignment
+        {
+            for (auto & a : assignments)
+                if (a == n)
+                    return contained;
+                else if (a.first == n.first)
+                    return contradicts;
+
+            return missing;
+        }
+    };
 
     struct SIP
     {
@@ -40,11 +146,12 @@ namespace
 
         Result result;
         map<unsigned, unsigned> fail_depths;
-        map<unsigned, unsigned> learned_clause_sizes;
 
         list<pair<vector<bitset>, vector<bitset> > > adjacency_constraints;
 
         Domains initial_domains;
+
+        LearnedClauses learned_clauses;
 
         SIP(const Params & k, const Graph & pattern, const Graph & target) :
             params(k),
@@ -121,11 +228,14 @@ namespace
         auto learn_from_wipeout(const unsigned failed_variable, const Assignments & assignments) -> void
         {
             bitset to_explain = initial_domains[failed_variable].values;
-            unsigned clause_length = 0;
+            vector<Assignment> new_nogood;
+            set<Assignment> used_in_new_nogood;
 
             for (auto & assignment : reverse(assignments)) {
                 if (to_explain.none())
                     break;
+
+                new_nogood.push_back(assignment);
 
                 bitset supported_values = to_explain;
 
@@ -135,18 +245,25 @@ namespace
                     if (c.first[assignment.first].test(failed_variable))
                         supported_values &= c.second[assignment.second];
 
-                if (to_explain != supported_values)
-                    ++clause_length;
+                if (supported_values != to_explain)
+                    used_in_new_nogood.insert(assignment);
 
+                learned_clauses.apply_units(new_nogood, failed_variable, supported_values, used_in_new_nogood);
                 to_explain &= supported_values;
             }
 
             if (! to_explain.none()) {
-                cerr << "Oops: couldn't explain failure: to explain contains " << to_explain.count()
-                    << " of " << initial_domains[failed_variable].values.count() << endl;
+                cerr << "Oops: couldn't explain failure: to explain " << failed_variable << " contains " << to_explain.count()
+                    << " of " << initial_domains[failed_variable].values.count() << ":";
+                for (unsigned v = 0 ; v < to_explain.size() ; ++v)
+                    if (to_explain[v])
+                        cerr << " " << v;
+                cerr << endl;
             }
-            else
-                learned_clause_sizes[clause_length]++;
+            else {
+                vector<Assignment> reduced_new_nogood(used_in_new_nogood.begin(), used_in_new_nogood.end());
+                learned_clauses.add(move(reduced_new_nogood));
+            }
         }
 
         auto solve(const Domains & domains, const Assignments & assignments) -> bool
@@ -201,8 +318,11 @@ namespace
                         result.isomorphism.emplace(a.first, a.second);
                     return true;
                 }
-                else if (solve(new_domains, new_assignments))
-                    return true;
+                else {
+                    if (learned_clauses.reduce_assigned_domains(new_assignments, new_domains))
+                        if (solve(new_domains, new_assignments))
+                            return true;
+                }
             }
 
             return false;
@@ -214,6 +334,10 @@ namespace
 
             for (auto & d : fail_depths)
                 result.stats["D" + to_string(d.first)] = to_string(d.second);
+
+            map<unsigned, unsigned> learned_clause_sizes;
+            for (auto & d : learned_clauses.nogoods)
+                learned_clause_sizes[d.size()]++;
 
             for (auto & d : learned_clause_sizes)
                 result.stats["L" + to_string(d.first)] = to_string(d.second);
