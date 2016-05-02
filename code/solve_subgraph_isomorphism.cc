@@ -2,7 +2,6 @@
 
 #include "lad.hh"
 #include "dimacs.hh"
-#include "simple.hh"
 #include "sequential.hh"
 
 #include <boost/program_options.hpp>
@@ -84,7 +83,6 @@ auto run_this(Result_ func(const Data_ &, const Params_ &)) -> std::function<Res
 auto main(int argc, char * argv[]) -> int
 {
     auto subgraph_isomorphism_algorithms = {
-        std::make_pair( std::string{ "simple" },             simple_subgraph_isomorphism ),
         std::make_pair( std::string{ "sequential" },         sequential_subgraph_isomorphism ),
     };
 
