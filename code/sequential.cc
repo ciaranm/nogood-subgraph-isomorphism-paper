@@ -21,10 +21,31 @@ using std::move;
 
 using std::cerr;
 using std::endl;
+using std::ostream;
 
 using boost::adaptors::reverse;
 
 using bitset = boost::dynamic_bitset<>;
+
+template <typename T, typename U>
+ostream & operator<< (ostream & s, const pair<T, U> & v)
+{
+    s << "(" << v.first << ", " << v.second << ")";
+    return s;
+}
+
+template <typename T>
+ostream & operator<< (ostream & s, const vector<T> & v)
+{
+    s << "[";
+    for (size_t i = 0 ; i < v.size() ; ++i) {
+        s << v[i];
+        if (i != v.size() - 1)
+            s << ", ";
+    }
+    s << "]";
+    return s;
+}
 
 namespace
 {
@@ -39,13 +60,31 @@ namespace
     using Assignment = pair<unsigned, unsigned>;
     using Assignments = vector<Assignment>;
 
+    struct Nogood;
+
+    using NogoodList = list<Nogood *>;
+
+    struct Nogood
+    {
+        NogoodList::iterator active_list_position;
+        NogoodList::iterator first_list_position;
+        NogoodList::iterator second_list_position;
+        vector<Assignment> assignments;
+    };
+
     struct LearnedClauses
     {
-        list<vector<Assignment> > nogoods;
+        NogoodList active;
+        list<Nogood> nogood_store;
 
         auto add(vector<Assignment> && clause) -> void
         {
-            nogoods.push_back(move(clause));
+            Nogood nogood;
+            nogood.assignments = move(clause);
+
+            auto nogood_position = nogood_store.insert(nogood_store.end(), move(nogood));
+            auto active_position = active.insert(active.end(), &*nogood_position);
+            nogood_position->active_list_position = active_position;
         }
 
         auto apply_forced_assignment(Domains & domains, const Assignment & a)
@@ -61,17 +100,32 @@ namespace
 
         enum nogood_knowledge { irrelevant, totally_nogood, single_assignment_forced };
 
-        auto reduce_assigned_domains(const vector<Assignment> & assignments, Domains & domains) -> bool
+        auto propagate_assignment(const Assignment & new_assignment,
+                const vector<Assignment> & assignments, Domains & domains) -> bool
         {
-            for (auto & nogood : nogoods) {
-                Assignment forced_assignment;
-                switch (what_does_nogood_tell_us(nogood, assignments, forced_assignment)) {
+            // for each assignment that doesn't have a home yet...
+            if (! propagate_assignment_using_clause_list(active, assignments, domains))
+                return false;
+
+            return true;
+        }
+
+        auto propagate_assignment_using_clause_list(
+                NogoodList & clause_list,
+                const vector<Assignment> & assignments,
+                Domains & domains) -> bool
+        {
+            for (auto nogood = clause_list.begin(), nogood_end = clause_list.end() ; nogood != nogood_end ; ) {
+                const Assignment * first_mismatch = nullptr, * second_mismatch = nullptr;
+                switch (what_does_nogood_tell_us(**nogood, assignments, first_mismatch, second_mismatch)) {
                     case totally_nogood:
                         return false;
                     case single_assignment_forced:
-                        apply_forced_assignment(domains, forced_assignment);
+                        apply_forced_assignment(domains, *first_mismatch);
+                        ++nogood;
                         break;
                     case irrelevant:
+                        // move to its new homes
                         break;
                 }
             }
@@ -82,38 +136,46 @@ namespace
         auto apply_units(const vector<Assignment> & assignments, unsigned branch_variable,
                 bitset & supported_values, set<Assignment> & used_assignments) -> void
         {
-            for (auto & nogood : nogoods) {
-                Assignment forced_assignment;
-                switch (what_does_nogood_tell_us(nogood, assignments, forced_assignment)) {
-                    case totally_nogood:
-                        throw 0;
-                    case single_assignment_forced:
-                        if (forced_assignment.first == branch_variable) {
-                            used_assignments.insert(nogood.begin(), nogood.end());
-                            supported_values.reset(forced_assignment.second);
-                        }
-                        break;
-                    case irrelevant:
-                        break;
-                }
+            for (auto & nogood : nogood_store)
+                apply_this_nogood_to_units(nogood, assignments, branch_variable, supported_values, used_assignments);
+        }
+
+        auto apply_this_nogood_to_units(const Nogood & nogood,
+                const vector<Assignment> & assignments, unsigned branch_variable,
+                bitset & supported_values, set<Assignment> & used_assignments) -> void
+        {
+            const Assignment * first_mismatch = nullptr, * second_mismatch = nullptr;
+            switch (what_does_nogood_tell_us(nogood, assignments, first_mismatch, second_mismatch)) {
+                case totally_nogood:
+                    throw 0;
+                case single_assignment_forced:
+                    if (first_mismatch->first == branch_variable) {
+                        used_assignments.insert(nogood.assignments.begin(), nogood.assignments.end());
+                        supported_values.reset(first_mismatch->second);
+                    }
+                    break;
+                case irrelevant:
+                    break;
             }
         }
 
         enum contained_in_assignment { contained, contradicts, missing };
 
-        auto what_does_nogood_tell_us(const vector<Assignment> & nogood, const vector<Assignment> & assignments,
-                Assignment & forced) -> nogood_knowledge
+        auto what_does_nogood_tell_us(const Nogood & nogood, const vector<Assignment> & assignments,
+                const Assignment * & first_mismatch, const Assignment * & second_mismatch) -> nogood_knowledge
         {
             unsigned n_missing = 0;
-            for (auto & n : nogood) {
+            for (auto & n : nogood.assignments) {
                 switch (contained_in_assignments(n, assignments)) {
                     case contained:
                         break;
                     case contradicts:
+                        first_mismatch = &n;
                         return irrelevant;
                     case missing:
                         ++n_missing;
-                        forced = n;
+                        second_mismatch = first_mismatch;
+                        first_mismatch = &n;
                         break;
                 }
                 if (n_missing > 1)
@@ -344,7 +406,7 @@ namespace
                     return true;
                 }
                 else {
-                    if (learned_clauses.reduce_assigned_domains(new_assignments, new_domains))
+                    if (learned_clauses.propagate_assignment({ branch_domain.v, branch_value }, new_assignments, new_domains))
                         if (solve(new_domains, new_assignments))
                             return true;
                 }
@@ -361,8 +423,8 @@ namespace
                 result.stats["D" + to_string(d.first)] = to_string(d.second);
 
             map<unsigned, unsigned> learned_clause_sizes;
-            for (auto & d : learned_clauses.nogoods)
-                learned_clause_sizes[d.size()]++;
+            for (auto & d : learned_clauses.nogood_store)
+                learned_clause_sizes[d.assignments.size()]++;
 
             for (auto & d : learned_clause_sizes)
                 result.stats["L" + to_string(d.first)] = to_string(d.second);
