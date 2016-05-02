@@ -98,6 +98,7 @@ namespace
         NogoodList::iterator first_list_position;
         NogoodList::iterator second_list_position;
         vector<Assignment> assignments;
+        bool from_branch;
     };
 
     struct LearnedClauses
@@ -107,10 +108,11 @@ namespace
 
         list<Nogood> nogood_store;
 
-        auto add(vector<Assignment> && clause) -> void
+        auto add(vector<Assignment> && clause, bool from_branch) -> void
         {
             auto nogood_position = nogood_store.insert(nogood_store.end(), Nogood{ });
             nogood_position->assignments = move(clause);
+            nogood_position->from_branch = from_branch;
 
             auto active_position = active.insert(active.end(), &*nogood_position);
             nogood_position->active_list_position = active_position;
@@ -493,7 +495,7 @@ namespace
                 cerr << endl;
             }
             else {
-                learned_clauses.add(move(new_nogood));
+                learned_clauses.add(move(new_nogood), whole_branch);
             }
         }
 
@@ -595,12 +597,18 @@ namespace
             for (auto & d : fail_depths)
                 result.stats["D" + to_string(d.first)] = to_string(d.second);
 
-            map<unsigned, unsigned> learned_clause_sizes;
+            map<unsigned, unsigned> learned_clause_sizes_w, learned_clause_sizes_b;
             for (auto & d : learned_clauses.nogood_store)
-                learned_clause_sizes[d.assignments.size()]++;
+                if (d.from_branch)
+                    learned_clause_sizes_b[d.assignments.size()]++;
+                else
+                    learned_clause_sizes_w[d.assignments.size()]++;
 
-            for (auto & d : learned_clause_sizes)
-                result.stats["L" + to_string(d.first)] = to_string(d.second);
+            for (auto & d : learned_clause_sizes_b)
+                result.stats["B" + to_string(d.first)] = to_string(d.second);
+
+            for (auto & d : learned_clause_sizes_w)
+                result.stats["W" + to_string(d.first)] = to_string(d.second);
         }
     };
 }
