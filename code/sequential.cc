@@ -228,6 +228,18 @@ namespace
                 }
         }
 
+        auto apply_all_the_units(
+                const vector<Assignment> &,
+                const vector<unsigned> & assignments_map,
+                unsigned branch_variable,
+                bitset & to_explain,
+                set<Assignment> & used_assignments) -> void
+        {
+            for (auto & nogood : nogood_store)
+                if (apply_this_nogood_to_units(nogood, assignments_map, branch_variable, to_explain, used_assignments)) {
+                }
+        }
+
         auto apply_this_nogood_to_units(
                 Nogood & nogood,
                 const vector<unsigned> & assignments_map,
@@ -305,6 +317,24 @@ namespace
                 return ContainedInAssignment::contained;
             else
                 return ContainedInAssignment::contradicts;
+        }
+
+        auto current_branch_is_eliminated(
+                const vector<unsigned> & assignments_map) -> bool
+        {
+            Assignment * first_mismatch = nullptr, * second_mismatch = nullptr;
+            for (auto & nogood : nogood_store)
+                switch (what_does_nogood_tell_us(nogood, assignments_map, first_mismatch, second_mismatch)) {
+                    case NogoodKnowledge::totally_nogood:
+                        return true;
+
+                    case NogoodKnowledge::single_assignment_forced:
+                    case NogoodKnowledge::irrelevant:
+                    case NogoodKnowledge::contradicting:
+                        break;
+                }
+
+            return false;
         }
     };
 
@@ -393,8 +423,8 @@ namespace
                     });
         }
 
-        auto learn_from_wipeout(const unsigned failed_variable, const Assignments & assignments,
-                const vector<unsigned> & assignments_map) -> void
+        auto learn_from(const unsigned failed_variable, const Assignments & assignments,
+                const vector<unsigned> & assignments_map, bool whole_branch) -> void
         {
             bitset to_explain = initial_domains[failed_variable].values;
             vector<Assignment> new_nogood;
@@ -440,7 +470,12 @@ namespace
             if (! to_explain.none()) {
                 bitset still_to_explain = to_explain;
                 set<Assignment> used_assignments;
-                learned_clauses.apply_units(assignments, assignments_map, failed_variable, still_to_explain, used_assignments);
+                if (whole_branch)
+                    learned_clauses.apply_all_the_units(
+                            assignments, assignments_map, failed_variable, still_to_explain, used_assignments);
+                else
+                    learned_clauses.apply_units(
+                            assignments, assignments_map, failed_variable, still_to_explain, used_assignments);
                 to_explain &= still_to_explain;
 
                 for (auto & a : used_assignments)
@@ -449,7 +484,8 @@ namespace
             }
 
             if (! to_explain.none()) {
-                cerr << "Oops: couldn't explain failure: to explain " << failed_variable << " contains " << to_explain.count()
+                cerr << "Oops: couldn't explain failure: to explain " << failed_variable << "/" << whole_branch
+                    << " contains " << to_explain.count()
                     << " of " << initial_domains[failed_variable].values.count() << ":";
                 for (unsigned v = 0 ; v < to_explain.size() ; ++v)
                     if (to_explain[v])
@@ -477,8 +513,8 @@ namespace
                 // domain wipeout
                 ++fail_depths[assignments.size()];
 
-                if (params.learn)
-                    learn_from_wipeout(branch_domain.v, assignments, assignments_map);
+                if (params.learn && ! *params.abort)
+                    learn_from(branch_domain.v, assignments, assignments_map, false);
 
                 return false;
             }
@@ -540,7 +576,13 @@ namespace
                         learned_clauses.spent_clauses.erase(c++);
                     }
                 }
+
+                if (learned_clauses.current_branch_is_eliminated(assignments_map))
+                    return false;
             }
+
+            if (params.learn && ! *params.abort)
+                learn_from(branch_domain.v, assignments, assignments_map, true);
 
             return false;
         }
