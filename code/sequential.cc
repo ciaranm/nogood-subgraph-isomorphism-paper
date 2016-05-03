@@ -308,24 +308,6 @@ namespace
             else
                 return ContainedInAssignment::contradicts;
         }
-
-        auto current_branch_is_eliminated(
-                const vector<unsigned> & assignments_map) -> bool
-        {
-            Assignment * first_mismatch = nullptr, * second_mismatch = nullptr;
-            for (auto & nogood : nogood_store)
-                switch (what_does_nogood_tell_us(nogood, assignments_map, first_mismatch, second_mismatch)) {
-                    case NogoodKnowledge::totally_nogood:
-                        return true;
-
-                    case NogoodKnowledge::single_assignment_forced:
-                    case NogoodKnowledge::irrelevant:
-                    case NogoodKnowledge::contradicting:
-                        break;
-                }
-
-            return false;
-        }
     };
 
     struct SIP
@@ -485,6 +467,7 @@ namespace
 
         auto solve(
                 const Domains & domains,
+                const Domain & branch_domain,
                 const Assignments & assignments,
                 const vector<unsigned> & assignments_map) -> pair<bool, Nogood *>
         {
@@ -492,21 +475,6 @@ namespace
                 return { false, nullptr };
 
             ++result.nodes;
-
-            auto & branch_domain = select_branch_domain(domains);
-
-            if (branch_domain.values.none()) {
-                // domain wipeout
-                ++fail_depths[assignments.size()];
-
-                if (params.learn && ! *params.abort)
-                    return { false, learn_from(branch_domain.v, assignments, assignments_map, false) };
-                else
-                    return { false, nullptr };
-            }
-            // else if (branch_domain.values.count() == 1) {
-                // entailed by previous assignments?
-            // }
 
             auto new_assignments_map = assignments_map;
 
@@ -524,17 +492,7 @@ namespace
                     if (d.v == branch_domain.v)
                         continue;
 
-                    auto new_values = d.values;
-
-                    // injectivity
-                    new_values.reset(branch_value);
-
-                    // adjacency
-                    for (auto & c : adjacency_constraints)
-                        if (c.first[branch_domain.v].test(d.v))
-                            new_values &= c.second[branch_value];
-
-                    new_domains.emplace_back(Domain{ unsigned(d.v), new_values });
+                    new_domains.emplace_back(Domain{ unsigned(d.v), d.values });
                 }
 
                 if (new_domains.empty()) {
@@ -542,32 +500,58 @@ namespace
                         result.isomorphism.emplace(a.first, a.second);
                     return { true, nullptr };
                 }
+
+                Nogood * failure = nullptr;
+
+                // save spent clauses position
+                auto spent_clauses_restore = learned_clauses.spent_clauses.begin();
+
+                for (auto & d : new_domains) {
+                    // injectivity
+                    d.values.reset(branch_value);
+
+                    // adjacency
+                    for (auto & c : adjacency_constraints)
+                        if (c.first[branch_domain.v].test(d.v))
+                            d.values &= c.second[branch_value];
+                }
+
+                learned_clauses.propagate_assignment({ branch_domain.v, branch_value }, new_assignments_map, new_domains);
+
+                auto & new_branch_domain = select_branch_domain(new_domains);
+
+                if (new_branch_domain.values.none()) {
+                    // domain wipeout
+                    ++fail_depths[new_assignments.size()];
+
+                    if (params.learn && ! *params.abort)
+                        failure = learn_from(new_branch_domain.v, new_assignments, new_assignments_map, false);
+                }
                 else {
-                    // save spent clauses position
-                    auto spent_clauses_restore = learned_clauses.spent_clauses.begin();
-
-                    learned_clauses.propagate_assignment({ branch_domain.v, branch_value }, new_assignments_map, new_domains);
-
-                    auto subproblem = solve(new_domains, new_assignments, new_assignments_map);
+                    auto subproblem = solve(new_domains, new_branch_domain, new_assignments, new_assignments_map);
 
                     if (subproblem.first)
                         return { true, nullptr };
+                    else
+                        failure = subproblem.second;
+                }
 
-                    // restore spent clauses position
-                    for (auto c = learned_clauses.spent_clauses.begin() ; c != spent_clauses_restore ; ) {
-                        Nogood * nogood = *c;
-                        nogood->spent_list_position = learned_clauses.spent_clauses.end();
-                        auto & first_list = learned_clauses.watches[nogood->assignments.at(0)];
-                        nogood->first_list_position = first_list.insert(first_list.end(), nogood);
-                        auto & second_list = learned_clauses.watches[nogood->assignments.at(1)];
-                        nogood->second_list_position = second_list.insert(second_list.end(), nogood);
-                        learned_clauses.spent_clauses.erase(c++);
-                    }
+                // restore spent clauses position
+                for (auto c = learned_clauses.spent_clauses.begin() ; c != spent_clauses_restore ; ) {
+                    Nogood * nogood = *c;
+                    nogood->spent_list_position = learned_clauses.spent_clauses.end();
+                    auto & first_list = learned_clauses.watches[nogood->assignments.at(0)];
+                    nogood->first_list_position = first_list.insert(first_list.end(), nogood);
+                    auto & second_list = learned_clauses.watches[nogood->assignments.at(1)];
+                    nogood->second_list_position = second_list.insert(second_list.end(), nogood);
+                    learned_clauses.spent_clauses.erase(c++);
+                }
 
-                    if ((! assignments.empty()) && subproblem.second && subproblem.second->assignments.end() == find(
-                                subproblem.second->assignments.begin(), subproblem.second->assignments.end(),
+                if (failure) {
+                    if ((! new_assignments.empty()) && failure->assignments.end() == find(
+                                failure->assignments.begin(), failure->assignments.end(),
                                 Assignment{ branch_domain.v, branch_value })) {
-                        return subproblem;
+                        return { false, failure };
                     }
                 }
             }
@@ -576,14 +560,18 @@ namespace
                 auto new_clause = learn_from(branch_domain.v, assignments, assignments_map, true);
                 return { false, new_clause };
             }
-
-            return { false, nullptr };
+            else
+                return { false, nullptr };
         }
 
         auto run()
         {
             vector<unsigned> assignments_map(initial_domains.size(), unassigned);
-            solve(initial_domains, {}, assignments_map);
+
+            auto & branch_domain = select_branch_domain(initial_domains);
+
+            if (! branch_domain.values.none())
+                solve(initial_domains, branch_domain, {}, assignments_map);
 
             for (auto & d : fail_depths)
                 result.stats["D" + to_string(d.first)] = to_string(d.second);
