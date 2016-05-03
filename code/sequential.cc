@@ -108,7 +108,7 @@ namespace
 
         list<Nogood> nogood_store;
 
-        auto add(vector<Assignment> && clause, bool from_branch) -> void
+        auto add(vector<Assignment> && clause, bool from_branch) -> Nogood *
         {
             auto nogood_position = nogood_store.insert(nogood_store.end(), Nogood{ });
             nogood_position->assignments = move(clause);
@@ -116,6 +116,8 @@ namespace
 
             auto active_position = active.insert(active.end(), &*nogood_position);
             nogood_position->active_list_position = active_position;
+
+            return &*nogood_position;
         }
 
         auto apply_forced_assignment(Domains & domains, const Assignment & a)
@@ -223,23 +225,9 @@ namespace
                 set<Assignment> & used_assignments) -> void
         {
             for (auto & nogood : active)
-                if (apply_this_nogood_to_units(*nogood, assignments_map, branch_variable, to_explain, used_assignments)) {
-                }
+                apply_this_nogood_to_units(*nogood, assignments_map, branch_variable, to_explain, used_assignments);
             for (auto & nogood : spent_clauses)
-                if (apply_this_nogood_to_units(*nogood, assignments_map, branch_variable, to_explain, used_assignments)) {
-                }
-        }
-
-        auto apply_all_the_units(
-                const vector<Assignment> &,
-                const vector<unsigned> & assignments_map,
-                unsigned branch_variable,
-                bitset & to_explain,
-                set<Assignment> & used_assignments) -> void
-        {
-            for (auto & nogood : nogood_store)
-                if (apply_this_nogood_to_units(nogood, assignments_map, branch_variable, to_explain, used_assignments)) {
-                }
+                apply_this_nogood_to_units(*nogood, assignments_map, branch_variable, to_explain, used_assignments);
         }
 
         auto apply_this_nogood_to_units(
@@ -247,13 +235,16 @@ namespace
                 const vector<unsigned> & assignments_map,
                 unsigned branch_variable,
                 bitset & to_explain,
-                set<Assignment> & used_assignments) -> bool
+                set<Assignment> & used_assignments) -> void
         {
             Assignment * first_mismatch = nullptr, * second_mismatch = nullptr;
             switch (what_does_nogood_tell_us(nogood, assignments_map, first_mismatch, second_mismatch)) {
                 case NogoodKnowledge::totally_nogood:
-                    cerr << "totally nogood " << nogood.assignments << " on branch " << assignments_map << endl;
-                    throw 0;
+                    for (auto & a : nogood.assignments)
+                        if (a.first != branch_variable)
+                            used_assignments.insert(a);
+                    to_explain.reset();
+                    break;
 
                 case NogoodKnowledge::single_assignment_forced:
                     if (first_mismatch->first == branch_variable && to_explain.test(first_mismatch->second)) {
@@ -261,7 +252,6 @@ namespace
                             if (a.first != branch_variable)
                                 used_assignments.insert(a);
                         to_explain.reset(first_mismatch->second);
-                        return true;
                     }
                     break;
 
@@ -271,8 +261,6 @@ namespace
                 case NogoodKnowledge::irrelevant:
                     break;
             }
-
-            return false;
         }
 
         enum class ContainedInAssignment { contained, contradicts, missing };
@@ -426,7 +414,7 @@ namespace
         }
 
         auto learn_from(const unsigned failed_variable, const Assignments & assignments,
-                const vector<unsigned> & assignments_map, bool whole_branch) -> void
+                const vector<unsigned> & assignments_map, bool whole_branch) -> Nogood *
         {
             bitset to_explain = initial_domains[failed_variable].values;
             vector<Assignment> new_nogood;
@@ -472,12 +460,7 @@ namespace
             if (! to_explain.none()) {
                 bitset still_to_explain = to_explain;
                 set<Assignment> used_assignments;
-                if (whole_branch)
-                    learned_clauses.apply_all_the_units(
-                            assignments, assignments_map, failed_variable, still_to_explain, used_assignments);
-                else
-                    learned_clauses.apply_units(
-                            assignments, assignments_map, failed_variable, still_to_explain, used_assignments);
+                learned_clauses.apply_units(assignments, assignments_map, failed_variable, still_to_explain, used_assignments);
                 to_explain &= still_to_explain;
 
                 for (auto & a : used_assignments)
@@ -493,19 +476,20 @@ namespace
                     if (to_explain[v])
                         cerr << " " << v;
                 cerr << endl;
+                return nullptr;
             }
             else {
-                learned_clauses.add(move(new_nogood), whole_branch);
+                return learned_clauses.add(move(new_nogood), whole_branch);
             }
         }
 
         auto solve(
                 const Domains & domains,
                 const Assignments & assignments,
-                const vector<unsigned> & assignments_map) -> bool
+                const vector<unsigned> & assignments_map) -> pair<bool, Nogood *>
         {
             if (*params.abort)
-                return false;
+                return { false, nullptr };
 
             ++result.nodes;
 
@@ -516,9 +500,9 @@ namespace
                 ++fail_depths[assignments.size()];
 
                 if (params.learn && ! *params.abort)
-                    learn_from(branch_domain.v, assignments, assignments_map, false);
-
-                return false;
+                    return { false, learn_from(branch_domain.v, assignments, assignments_map, false) };
+                else
+                    return { false, nullptr };
             }
             // else if (branch_domain.values.count() == 1) {
                 // entailed by previous assignments?
@@ -556,16 +540,18 @@ namespace
                 if (new_domains.empty()) {
                     for (auto & a : new_assignments)
                         result.isomorphism.emplace(a.first, a.second);
-                    return true;
+                    return { true, nullptr };
                 }
                 else {
                     // save spent clauses position
                     auto spent_clauses_restore = learned_clauses.spent_clauses.begin();
 
-                    if (learned_clauses.propagate_assignment({ branch_domain.v, branch_value }, new_assignments_map, new_domains)) {
-                        if (solve(new_domains, new_assignments, new_assignments_map))
-                            return true;
-                    }
+                    learned_clauses.propagate_assignment({ branch_domain.v, branch_value }, new_assignments_map, new_domains);
+
+                    auto subproblem = solve(new_domains, new_assignments, new_assignments_map);
+
+                    if (subproblem.first)
+                        return { true, nullptr };
 
                     // restore spent clauses position
                     for (auto c = learned_clauses.spent_clauses.begin() ; c != spent_clauses_restore ; ) {
@@ -577,16 +563,21 @@ namespace
                         nogood->second_list_position = second_list.insert(second_list.end(), nogood);
                         learned_clauses.spent_clauses.erase(c++);
                     }
-                }
 
-                if (learned_clauses.current_branch_is_eliminated(assignments_map))
-                    return false;
+                    if ((! assignments.empty()) && subproblem.second && subproblem.second->assignments.end() == find(
+                                subproblem.second->assignments.begin(), subproblem.second->assignments.end(),
+                                Assignment{ branch_domain.v, branch_value })) {
+                        return subproblem;
+                    }
+                }
             }
 
-            if (params.learn && ! *params.abort)
-                learn_from(branch_domain.v, assignments, assignments_map, true);
+            if (params.learn && ! *params.abort) {
+                auto new_clause = learn_from(branch_domain.v, assignments, assignments_map, true);
+                return { false, new_clause };
+            }
 
-            return false;
+            return { false, nullptr };
         }
 
         auto run()
