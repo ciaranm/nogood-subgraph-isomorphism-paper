@@ -366,10 +366,15 @@ namespace
             build_d1_adjacency(target, d1.second);
 
             if (params.d2graphs) {
-                auto & d2 = *adjacency_constraints.insert(
+                auto & d21 = *adjacency_constraints.insert(
                         adjacency_constraints.end(), make_pair(vector<bitset>(), vector<bitset>()));
-                build_d2_adjacency(pattern, d2.first);
-                build_d2_adjacency(target, d2.second);
+                auto & d22 = *adjacency_constraints.insert(
+                        adjacency_constraints.end(), make_pair(vector<bitset>(), vector<bitset>()));
+                auto & d23 = *adjacency_constraints.insert(
+                        adjacency_constraints.end(), make_pair(vector<bitset>(), vector<bitset>()));
+
+                build_d2_adjacency(pattern, d21.first, d22.first, d23.first);
+                build_d2_adjacency(target, d21.second, d22.second, d23.second);
             }
         }
 
@@ -384,16 +389,29 @@ namespace
             }
         }
 
-        auto build_d2_adjacency(const Graph & graph, vector<bitset> & adj) const -> void
+        auto build_d2_adjacency(const Graph & graph,
+                vector<bitset> & adj1,
+                vector<bitset> & adj2,
+                vector<bitset> & adj3) const -> void
         {
-            adj.resize(graph.size());
+            adj1.resize(graph.size());
+            adj2.resize(graph.size());
+            adj3.resize(graph.size());
             for (unsigned t = 0 ; t < graph.size() ; ++t) {
-                adj[t] = bitset(graph.size(), 0);
+                adj1[t] = bitset(graph.size(), 0);
+                adj2[t] = bitset(graph.size(), 0);
+                adj3[t] = bitset(graph.size(), 0);
                 for (unsigned u = 0 ; u < graph.size() ; ++u)
                     if (graph.adjacent(t, u))
                         for (unsigned v = 0 ; v < graph.size() ; ++v)
-                            if (t != v && graph.adjacent(u, v))
-                                adj[t].set(v);
+                            if (t != v && graph.adjacent(u, v)) {
+                                if (adj2[t].test(v))
+                                    adj3[t].set(v);
+                                else if (adj1[t].test(v))
+                                    adj2[t].set(v);
+                                else
+                                    adj1[t].set(v);
+                            }
             }
         }
 
