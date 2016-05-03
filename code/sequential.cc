@@ -519,7 +519,6 @@ namespace
                 learned_clauses.propagate_assignment({ branch_domain.v, branch_value }, new_assignments_map, new_domains);
 
                 auto & new_branch_domain = select_branch_domain(new_domains);
-
                 if (new_branch_domain.values.none()) {
                     // domain wipeout
                     ++fail_depths[new_assignments.size()];
