@@ -318,6 +318,7 @@ namespace
         map<unsigned, unsigned> fail_depths;
 
         list<pair<vector<bitset>, vector<bitset> > > adjacency_constraints;
+        vector<unsigned> pattern_degrees, target_degrees;
 
         Domains initial_domains;
 
@@ -325,10 +326,18 @@ namespace
 
         SIP(const Params & k, const Graph & pattern, const Graph & target) :
             params(k),
+            pattern_degrees(pattern.size()),
+            target_degrees(target.size()),
             initial_domains(pattern.size())
         {
             // build up distance 1 adjacency bitsets
             add_adjacency_constraints(pattern, target);
+
+            for (unsigned p = 0 ; p < pattern.size() ; ++p)
+                pattern_degrees[p] = pattern.degree(p);
+
+            for (unsigned t = 0 ; t < target.size() ; ++t)
+                target_degrees[t] = target.degree(t);
 
             // build up initial domains
             for (unsigned p = 0 ; p < pattern.size() ; ++p) {
@@ -390,8 +399,12 @@ namespace
 
         auto select_branch_domain(const Domains & domains) -> const Domain &
         {
-            return *min_element(domains.begin(), domains.end(), [] (const auto & a, const auto & b) {
-                    return a.values.count() < b.values.count();
+            return *min_element(domains.begin(), domains.end(), [&] (const auto & a, const auto & b) {
+                    int ac = a.values.count();
+                    int bc = b.values.count();
+                    return (ac < bc)
+                        || (ac == bc && pattern_degrees[a.v] > pattern_degrees[b.v])
+                        || (ac == bc && pattern_degrees[a.v] == pattern_degrees[b.v] && a.v < b.v);
                     });
         }
 
@@ -478,9 +491,17 @@ namespace
 
             auto new_assignments_map = assignments_map;
 
+            vector<unsigned> branch_values;
             for (auto branch_value = branch_domain.values.find_first() ;
                     branch_value != bitset::npos ;
-                    branch_value = branch_domain.values.find_next(branch_value)) {
+                    branch_value = branch_domain.values.find_next(branch_value))
+                branch_values.push_back(branch_value);
+
+            sort(branch_values.begin(), branch_values.end(), [&] (const auto & a, const auto & b) {
+                    return target_degrees[a] < target_degrees[b] || (target_degrees[a] == target_degrees[b] && a < b);
+                    });
+
+            for (auto & branch_value : branch_values) {
                 auto new_assignments = assignments;
                 new_assignments.emplace_back(branch_domain.v, branch_value);
 
