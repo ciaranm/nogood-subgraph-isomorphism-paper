@@ -7,6 +7,7 @@
 #include <set>
 #include <list>
 #include <limits>
+#include <functional>
 #include <boost/dynamic_bitset.hpp>
 #include <boost/range/adaptor/reversed.hpp>
 #include <boost/functional/hash.hpp>
@@ -25,6 +26,7 @@ using std::make_pair;
 using std::pair;
 using std::move;
 using std::numeric_limits;
+using std::greater;
 
 using std::cerr;
 using std::endl;
@@ -339,6 +341,33 @@ namespace
             for (unsigned t = 0 ; t < target.size() ; ++t)
                 target_degrees[t] = target.degree(t);
 
+            vector<vector<vector<unsigned> > > p_nds(adjacency_constraints.size());
+            vector<vector<vector<unsigned> > > t_nds(adjacency_constraints.size());
+
+            for (unsigned p = 0 ; p < pattern.size() ; ++p) {
+                unsigned cn = 0;
+                for (auto & c : adjacency_constraints) {
+                    p_nds[cn].resize(pattern.size());
+                    for (unsigned q = 0 ; q < pattern.size() ; ++q)
+                        if (c.first[p][q])
+                            p_nds[cn][p].push_back(c.first[q].count());
+                    sort(p_nds[cn][p].begin(), p_nds[cn][p].end(), greater<unsigned>());
+                    ++cn;
+                }
+            }
+
+            for (unsigned t = 0 ; t < target.size() ; ++t) {
+                unsigned cn = 0;
+                for (auto & c : adjacency_constraints) {
+                    t_nds[cn].resize(target.size());
+                    for (unsigned q = 0 ; q < target.size() ; ++q)
+                        if (c.second[t][q])
+                            t_nds[cn][t].push_back(c.second[q].count());
+                    sort(t_nds[cn][t].begin(), t_nds[cn][t].end(), greater<unsigned>());
+                    ++cn;
+                }
+            }
+
             // build up initial domains
             for (unsigned p = 0 ; p < pattern.size() ; ++p) {
                 initial_domains[p].v = p;
@@ -346,11 +375,21 @@ namespace
 
                 for (unsigned t = 0 ; t < target.size() ; ++t) {
                     bool ok = true;
-                    for (auto & c : adjacency_constraints)
+                    for (auto & c : adjacency_constraints) {
                         if (! (c.first[p][p] == c.second[t][t] && c.first[p].count() <= c.second[t].count())) {
                             ok = false;
                             break;
                         }
+                    }
+
+                    for (unsigned cn = 0 ; cn < adjacency_constraints.size() && ok ; ++cn) {
+                        for (unsigned i = 0 ; i < p_nds[cn][p].size() ; ++i) {
+                            if (t_nds[cn][t][i] < p_nds[cn][p][i]) {
+                                ok = false;
+                                break;
+                            }
+                        }
+                    }
 
                     if (ok)
                         initial_domains[p].values.set(t);
