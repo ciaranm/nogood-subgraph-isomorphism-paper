@@ -499,15 +499,13 @@ namespace
         auto solve(
                 const Domains & domains,
                 const Domain & branch_domain,
-                const Assignments & assignments,
-                const vector<unsigned> & assignments_map) -> pair<bool, Nogood *>
+                Assignments & assignments,
+                vector<unsigned> & assignments_map) -> pair<bool, Nogood *>
         {
             if (*params.abort)
                 return { false, nullptr };
 
             ++result.nodes;
-
-            auto new_assignments_map = assignments_map;
 
             vector<unsigned> branch_values;
             for (auto branch_value = branch_domain.values.find_first() ;
@@ -520,10 +518,8 @@ namespace
                     });
 
             for (auto & branch_value : branch_values) {
-                auto new_assignments = assignments;
-                new_assignments.emplace_back(branch_domain.v, branch_value);
-
-                new_assignments_map[branch_domain.v] = branch_value;
+                assignments.emplace_back(branch_domain.v, branch_value);
+                assignments_map[branch_domain.v] = branch_value;
 
                 Domains new_domains;
                 new_domains.reserve(domains.size() - 1);
@@ -535,7 +531,7 @@ namespace
                 }
 
                 if (new_domains.empty()) {
-                    for (auto & a : new_assignments)
+                    for (auto & a : assignments)
                         result.isomorphism.emplace(a.first, a.second);
                     return { true, nullptr };
                 }
@@ -555,24 +551,28 @@ namespace
                             d.values &= c.second[branch_value];
                 }
 
-                learned_clauses.propagate_assignment({ branch_domain.v, branch_value }, new_assignments_map, new_domains);
+                learned_clauses.propagate_assignment({ branch_domain.v, branch_value }, assignments_map, new_domains);
 
                 auto & new_branch_domain = select_branch_domain(new_domains);
                 if (new_branch_domain.values.none()) {
                     // domain wipeout
-                    ++fail_depths[new_assignments.size()];
+                    ++fail_depths[assignments.size()];
 
                     if (params.learn && ! *params.abort)
-                        failure = learn_from(new_branch_domain.v, new_assignments, new_assignments_map, false);
+                        failure = learn_from(new_branch_domain.v, assignments, assignments_map, false);
                 }
                 else {
-                    auto subproblem = solve(new_domains, new_branch_domain, new_assignments, new_assignments_map);
+                    auto subproblem = solve(new_domains, new_branch_domain, assignments, assignments_map);
 
                     if (subproblem.first)
                         return { true, nullptr };
                     else
                         failure = subproblem.second;
                 }
+
+                // restore assignments
+                assignments_map[branch_domain.v] = unassigned;
+                assignments.pop_back();
 
                 // restore spent clauses position
                 for (auto c = learned_clauses.spent_clauses.begin() ; c != spent_clauses_restore ; ) {
@@ -586,7 +586,7 @@ namespace
                 }
 
                 if (failure) {
-                    if ((! new_assignments.empty()) && failure->assignments.end() == find(
+                    if ((! assignments.empty()) && failure->assignments.end() == find(
                                 failure->assignments.begin(), failure->assignments.end(),
                                 Assignment{ branch_domain.v, branch_value })) {
                         return { false, failure };
@@ -604,12 +604,13 @@ namespace
 
         auto run()
         {
+            vector<Assignment> assignments;
             vector<unsigned> assignments_map(initial_domains.size(), unassigned);
 
             auto & branch_domain = select_branch_domain(initial_domains);
 
             if (! branch_domain.values.none())
-                solve(initial_domains, branch_domain, {}, assignments_map);
+                solve(initial_domains, branch_domain, assignments, assignments_map);
 
             for (auto & d : fail_depths)
                 result.stats["D" + to_string(d.first)] = to_string(d.second);
