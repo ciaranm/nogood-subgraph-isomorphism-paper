@@ -51,7 +51,10 @@ namespace
 
         auto push_implication(unsigned a, unsigned b) -> void
         {
-            trail.emplace_back(a, b, false);
+            if (trail.end() == find_if(trail.begin(), trail.end(), [&] (const auto & x) {
+                        return get<0>(x) == a && get<1>(x) == b;
+                        }))
+                trail.emplace_back(a, b, false);
         }
 
         auto pop() -> void
