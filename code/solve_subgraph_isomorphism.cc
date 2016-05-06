@@ -3,6 +3,7 @@
 #include "lad.hh"
 #include "dimacs.hh"
 #include "sequential.hh"
+#include "satish.hh"
 
 #include <boost/program_options.hpp>
 
@@ -84,6 +85,7 @@ auto main(int argc, char * argv[]) -> int
 {
     auto subgraph_isomorphism_algorithms = {
         std::make_pair( std::string{ "sequential" },         sequential_subgraph_isomorphism ),
+        std::make_pair( std::string{ "satish" },             satish_subgraph_isomorphism ),
     };
 
     try {
