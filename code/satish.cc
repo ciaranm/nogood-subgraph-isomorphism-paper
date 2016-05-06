@@ -2,19 +2,30 @@
 
 #include "satish.hh"
 
+#include <algorithm>
 #include <functional>
 #include <list>
 #include <map>
-#include <vector>
+#include <tuple>
 #include <utility>
+#include <vector>
+
+#include <iostream>
 
 #include <boost/dynamic_bitset.hpp>
 
+using std::find_if;
+using std::get;
 using std::greater;
 using std::list;
+using std::make_pair;
 using std::map;
 using std::pair;
+using std::tuple;
 using std::vector;
+
+using std::cerr;
+using std::endl;
 
 using bitset = boost::dynamic_bitset<>;
 
@@ -23,6 +34,7 @@ namespace
     struct Domain
     {
         unsigned v;
+        bool fixed;
         bitset values;
     };
 
@@ -30,22 +42,32 @@ namespace
 
     struct Assignments
     {
-        vector<pair<unsigned, unsigned> > trail;
+        vector<tuple<unsigned, unsigned, bool> > trail;
 
-        auto push(unsigned a, unsigned b) -> void
+        auto push_branch(unsigned a, unsigned b) -> void
         {
-            trail.emplace_back(a, b);
+            trail.emplace_back(a, b, true);
+        }
+
+        auto push_implication(unsigned a, unsigned b) -> void
+        {
+            trail.emplace_back(a, b, false);
         }
 
         auto pop() -> void
         {
-            trail.pop_back();
+            while ((! trail.empty()) && (! get<2>(trail.back())))
+                trail.pop_back();
+
+            if (! trail.empty())
+                trail.pop_back();
         }
 
         auto store_to(map<int, int> & m) -> void
         {
-            for (auto & t : trail)
-                m.insert(t);
+            for (auto & t : trail) {
+                m.emplace(get<0>(t), get<1>(t));
+            }
         }
     };
 
@@ -106,6 +128,7 @@ namespace
             for (unsigned p = 0 ; p < pattern.size() ; ++p) {
                 initial_domains[p].v = p;
                 initial_domains[p].values = bitset(target.size());
+                initial_domains[p].fixed = false;
 
                 for (unsigned t = 0 ; t < target.size() ; ++t) {
                     bool ok = true;
@@ -188,20 +211,77 @@ namespace
             }
         }
 
-        auto select_branch_domain(const Domains & domains) -> const Domain &
+        auto select_branch_domain(Domains & domains) -> Domains::iterator
         {
-            return *min_element(domains.begin(), domains.end(), [&] (const auto & a, const auto & b) {
-                    int ac = a.values.count();
-                    int bc = b.values.count();
-                    return (ac < bc)
-                        || (ac == bc && pattern_degrees[a.v] > pattern_degrees[b.v])
-                        || (ac == bc && pattern_degrees[a.v] == pattern_degrees[b.v] && a.v < b.v);
+            auto best = domains.end();
+
+            for (auto d = domains.begin() ; d != domains.end() ; ++d) {
+                if (d->fixed)
+                    continue;
+
+                if (best == domains.end())
+                    best = d;
+                else {
+                    int best_c = best->values.count();
+                    int d_c = d->values.count();
+
+                    if (d_c < best_c)
+                        best = d;
+                    else if (d_c == best_c) {
+                        if (pattern_degrees[d->v] > pattern_degrees[best->v])
+                            best = d;
+                        else if (pattern_degrees[d->v] == pattern_degrees[best->v] && d->v < best->v)
+                            best = d;
+                    }
+                }
+            }
+
+            return best;
+        }
+
+        auto select_unit_domain(Domains & domains) -> Domains::iterator
+        {
+            return find_if(domains.begin(), domains.end(), [] (const auto & a) {
+                    return (! a.fixed) && 1 == a.values.count();
                     });
         }
 
+        auto unit_propagate(Domains & domains, Assignments & assignments)
+        {
+            while (! domains.empty()) {
+                auto unit_domain_iter = select_unit_domain(domains);
+
+                if (unit_domain_iter == domains.end())
+                    break;
+
+                auto unit_domain_v = unit_domain_iter->v;
+                auto unit_domain_value = unit_domain_iter->values.find_first();
+                unit_domain_iter->fixed = true;
+
+                assignments.push_implication(unit_domain_v, unit_domain_value);
+
+                for (auto & d : domains) {
+                    if (d.fixed)
+                        continue;
+
+                    // injectivity
+                    d.values.reset(unit_domain_value);
+
+                    // adjacency
+                    for (auto & c : adjacency_constraints)
+                        if (c.first[unit_domain_v].test(d.v))
+                            d.values &= c.second[unit_domain_value];
+
+                    if (d.values.none())
+                        return false;
+                }
+            }
+
+            return true;
+        }
+
         auto solve(
-                const Domains & domains,
-                const Domain & branch_domain,
+                Domains & domains,
                 Assignments & assignments) -> bool
         {
             if (*params.abort)
@@ -209,10 +289,20 @@ namespace
 
             ++result.nodes;
 
+            if (! unit_propagate(domains, assignments))
+                return false;
+
+            auto branch_domain = select_branch_domain(domains);
+
+            if (domains.end() == branch_domain) {
+                assignments.store_to(result.isomorphism);
+                return true;
+            }
+
             vector<unsigned> branch_values;
-            for (auto branch_value = branch_domain.values.find_first() ;
+            for (auto branch_value = branch_domain->values.find_first() ;
                     branch_value != bitset::npos ;
-                    branch_value = branch_domain.values.find_next(branch_value))
+                    branch_value = branch_domain->values.find_next(branch_value))
                 branch_values.push_back(branch_value);
 
             sort(branch_values.begin(), branch_values.end(), [&] (const auto & a, const auto & b) {
@@ -220,37 +310,26 @@ namespace
                     });
 
             for (auto & branch_value : branch_values) {
-                assignments.push(branch_domain.v, branch_value);
+                assignments.push_branch(branch_domain->v, branch_value);
 
                 Domains new_domains;
-                new_domains.reserve(domains.size() - 1);
+                new_domains.reserve(domains.size());
                 for (auto & d : domains) {
-                    if (d.v == branch_domain.v)
+                    if (d.fixed)
                         continue;
 
-                    new_domains.emplace_back(Domain{ unsigned(d.v), d.values });
+                    if (d.v == branch_domain->v) {
+                        bitset just_branch_value = d.values;
+                        just_branch_value.reset();
+                        just_branch_value.set(branch_value);
+                        new_domains.emplace_back(Domain{ unsigned(d.v), false, just_branch_value });
+                    }
+                    else
+                        new_domains.emplace_back(Domain{ unsigned(d.v), false, d.values });
                 }
 
-                if (new_domains.empty()) {
-                    assignments.store_to(result.isomorphism);
+                if (solve(new_domains, assignments))
                     return true;
-                }
-
-                for (auto & d : new_domains) {
-                    // injectivity
-                    d.values.reset(branch_value);
-
-                    // adjacency
-                    for (auto & c : adjacency_constraints)
-                        if (c.first[branch_domain.v].test(d.v))
-                            d.values &= c.second[branch_value];
-                }
-
-                auto & new_branch_domain = select_branch_domain(new_domains);
-                if (! new_branch_domain.values.none()) {
-                    if (solve(new_domains, new_branch_domain, assignments))
-                        return true;
-                }
 
                 // restore assignments
                 assignments.pop();
@@ -263,10 +342,9 @@ namespace
         {
             Assignments assignments;
 
-            auto & branch_domain = select_branch_domain(initial_domains);
+            // eliminate isolated vertices?
 
-            if (! branch_domain.values.none())
-                solve(initial_domains, branch_domain, assignments);
+            solve(initial_domains, assignments);
         }
     };
 }
