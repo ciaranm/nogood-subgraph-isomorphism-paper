@@ -21,7 +21,9 @@ using std::list;
 using std::make_pair;
 using std::map;
 using std::pair;
+using std::to_string;
 using std::tuple;
+using std::unique;
 using std::vector;
 
 using std::cerr;
@@ -36,6 +38,7 @@ namespace
         unsigned v;
         bool fixed;
         bitset values;
+        vector<unsigned> was_modified_by;
     };
 
     using Domains = vector<Domain>;
@@ -74,6 +77,8 @@ namespace
         }
     };
 
+    using LearnedClauses = list<pair<vector<pair<unsigned, unsigned> >, bool> >;
+
     struct SIP
     {
         const Params & params;
@@ -84,6 +89,8 @@ namespace
         vector<unsigned> pattern_degrees, target_degrees;
 
         Domains initial_domains;
+        LearnedClauses learned_clauses;
+        map<pair<unsigned, unsigned>, unsigned> fail_depths;
 
         SIP(const Params & k, const Graph & pattern, const Graph & target) :
             params(k),
@@ -249,7 +256,7 @@ namespace
                     });
         }
 
-        auto unit_propagate(Domains & domains, Assignments & assignments)
+        auto unit_propagate(Domains & domains, Assignments & assignments) -> LearnedClauses::iterator
         {
             while (! domains.empty()) {
                 auto unit_domain_iter = select_unit_domain(domains);
@@ -267,6 +274,8 @@ namespace
                     if (d.fixed)
                         continue;
 
+                    auto old_domain_size = d.values.count();
+
                     // injectivity
                     d.values.reset(unit_domain_value);
 
@@ -275,31 +284,45 @@ namespace
                         if (c.first[unit_domain_v].test(d.v))
                             d.values &= c.second[unit_domain_value];
 
-                    if (d.values.none())
-                        return false;
+                    auto new_domain_size = d.values.count();
+
+                    if (new_domain_size != old_domain_size)
+                        d.was_modified_by.emplace_back(assignments.trail.size() - 1);
+
+                    if (0 == new_domain_size) {
+                        vector<pair<unsigned, unsigned> > reason;
+                        for (auto & m : d.was_modified_by)
+                            reason.emplace_back(get<0>(assignments.trail.at(m)), get<1>(assignments.trail.at(m)));
+
+                        return learned_clauses.insert(learned_clauses.end(), make_pair(move(reason), false));
+                    }
                 }
             }
 
-            return true;
+            return learned_clauses.end();
         }
 
         auto solve(
                 Domains & domains,
-                Assignments & assignments) -> bool
+                Assignments & assignments) -> pair<bool, LearnedClauses::iterator>
         {
             if (*params.abort)
-                return false;
+                return make_pair(true, learned_clauses.end());
 
             ++result.nodes;
 
-            if (! unit_propagate(domains, assignments))
-                return false;
+            auto unit_propagation = unit_propagate(domains, assignments);
+            if (unit_propagation != learned_clauses.end()) {
+                ++fail_depths[make_pair(assignments.trail.size(), count_if(assignments.trail.begin(), assignments.trail.end(),
+                            [] (const auto & a) { return get<2>(a); }))];
+                return make_pair(false, unit_propagation);
+            }
 
             auto branch_domain = select_branch_domain(domains);
 
             if (domains.end() == branch_domain) {
                 assignments.store_to(result.isomorphism);
-                return true;
+                return make_pair(true, learned_clauses.end());
             }
 
             vector<unsigned> branch_values;
@@ -311,6 +334,8 @@ namespace
             sort(branch_values.begin(), branch_values.end(), [&] (const auto & a, const auto & b) {
                     return target_degrees[a] < target_degrees[b] || (target_degrees[a] == target_degrees[b] && a < b);
                     });
+
+            vector<pair<unsigned, unsigned> > full_reason;
 
             for (auto & branch_value : branch_values) {
                 assignments.push_branch(branch_domain->v, branch_value);
@@ -325,20 +350,29 @@ namespace
                         bitset just_branch_value = d.values;
                         just_branch_value.reset();
                         just_branch_value.set(branch_value);
-                        new_domains.emplace_back(Domain{ unsigned(d.v), false, just_branch_value });
+                        new_domains.emplace_back(Domain{ unsigned(d.v), false, just_branch_value, d.was_modified_by });
                     }
                     else
-                        new_domains.emplace_back(Domain{ unsigned(d.v), false, d.values });
+                        new_domains.emplace_back(Domain{ unsigned(d.v), false, d.values, d.was_modified_by });
                 }
 
-                if (solve(new_domains, assignments))
-                    return true;
+                auto solution = solve(new_domains, assignments);
+                if (solution.first)
+                    return solution;
+                else
+                    full_reason.insert(full_reason.end(), solution.second->first.begin(), solution.second->first.end());
 
                 // restore assignments
                 assignments.pop();
             }
 
-            return false;
+            for (auto & m : branch_domain->was_modified_by)
+                full_reason.emplace_back(get<0>(assignments.trail.at(m)), get<1>(assignments.trail.at(m)));
+
+            sort(full_reason.begin(), full_reason.end());
+            full_reason.erase(unique(full_reason.begin(), full_reason.end()), full_reason.end());
+
+            return make_pair(false, learned_clauses.insert(learned_clauses.end(), make_pair(move(full_reason), true)));
         }
 
         auto run()
@@ -348,6 +382,22 @@ namespace
             // eliminate isolated vertices?
 
             solve(initial_domains, assignments);
+
+            for (auto & d : fail_depths)
+                result.stats["D" + to_string(d.first.first) + "/" + to_string(d.first.second)] = to_string(d.second);
+
+            map<unsigned, unsigned> learned_clause_sizes_w, learned_clause_sizes_b;
+            for (auto & d : learned_clauses)
+                if (d.second)
+                    learned_clause_sizes_b[d.first.size()]++;
+                else
+                    learned_clause_sizes_w[d.first.size()]++;
+
+            for (auto & d : learned_clause_sizes_b)
+                result.stats["B" + to_string(d.first)] = to_string(d.second);
+
+            for (auto & d : learned_clause_sizes_w)
+                result.stats["A" + to_string(d.first)] = to_string(d.second);
         }
     };
 }
